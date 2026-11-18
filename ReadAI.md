@@ -68,7 +68,7 @@
 | `tools/build_firmware.sh` | Офлайн-сборка без PlatformIO (ядро 2.4.2 + xtensa gcc 4.8.2) |
 | `tools/elf2bin.py` | Склейка `eboot.elf` + `sketch.elf` в один `.bin` (вендорная копия из core 3.1.2 с патчем) |
 | `tools/pio_embed_web.py` | PlatformIO pre-build hook: пересобирает `page_html.h` |
-| `tools/flash.sh` | Прошивка через esptool (`COM7`, 921600 по умолчанию) |
+| `tools/flash.sh` / `tools/flash.bat` | Прошивка через esptool (`COM7`, 921600 по умолчанию) |
 | `platformio.ini` | Сборка/загрузка через PlatformIO (`board = nodemcuv2`) |
 | `tests/host/` | Хост-тесты логики (заглушки Arduino/EEPROM, `make -C tests/host run`) — 68 проверок: storage/CRC, помпы, датчик, планировщик |
 

@@ -219,6 +219,8 @@ pip install esptool
 ./tools/flash.sh /dev/ttyUSB0 460800
 ```
 
+Windows: `tools\flash.bat` (по умолчанию COM7, 921600).
+
 Или вручную:
 
 ```bash
