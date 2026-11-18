@@ -1,0 +1,484 @@
+#include "webui.h"
+
+#include <Arduino.h>
+#include <ESP8266WebServer.h>
+#include <time.h>
+
+#include "app_config.h"
+#include "channels.h"
+#include "scheduler.h"
+#include "storage.h"
+#include "netmgr.h"
+#include "page_html.h"
+
+static ESP8266WebServer s_server(80);
+
+/* ------------------------------------------------------------------ */
+/*  Вспомогательные функции                                            */
+/* ------------------------------------------------------------------ */
+
+static long arg_long(const char* name, long defVal) {
+  if (!s_server.hasArg(name)) return defVal;
+  String v = s_server.arg(name);
+  v.trim();
+  if (v.length() == 0) return defVal;
+  return v.toInt();
+}
+
+static bool arg_bool(const char* name, bool defVal) {
+  if (!s_server.hasArg(name)) return defVal;
+  String v = s_server.arg(name);
+  long n = v.toInt();
+  if (v == "true" || v == "on") return true;
+  if (v == "false" || v == "off") return false;
+  return n != 0;
+}
+
+static void send_json(int code, const String& body) {
+  s_server.sendHeader("Cache-Control", "no-store");
+  s_server.send(code, "application/json; charset=utf-8", body);
+}
+
+static void send_ok() {
+  send_json(200, F("{\"ok\":true}"));
+}
+
+static void send_err(int code, const char* msg) {
+  String j = F("{\"ok\":false,\"error\":\"");
+  j += msg;
+  j += F("\"}");
+  send_json(code, j);
+}
+
+static bool pin_valid(int pin) {
+  return pin >= 0 && pin <= 16 && !(pin >= 6 && pin <= 11);
+}
+
+/* ------------------------------------------------------------------ */
+/*  JSON состояния                                                     */
+/* ------------------------------------------------------------------ */
+
+static void append_time_strings(String& j, time_t now, bool valid) {
+  char buf[40];
+  if (valid) {
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    strftime(buf, sizeof(buf), "%H:%M:%S", &tmv);
+    j += F("\"time\":\"");
+    j += buf;
+    strftime(buf, sizeof(buf), "%d.%m.%Y", &tmv);
+    j += F("\",\"date\":\"");
+    j += buf;
+    j += '"';
+  } else {
+    j += F("\"time\":\"--:--:--\",\"date\":\"нет времени\"");
+  }
+}
+
+static String build_state_json() {
+  String j;
+  j.reserve(1800);
+
+  time_t now = time(nullptr);
+  bool tv = sched_time_valid();
+
+  j += F("{\"fw\":\"" FW_VERSION "\",\"name\":\"" FW_NAME "\",");
+  j += F("\"now\":");
+  j += String((uint32_t)now);
+  j += ',';
+  append_time_strings(j, now, tv);
+  j += F(",\"timeValid\":");
+  j += tv ? '1' : '0';
+
+  /* Wi-Fi */
+  j += F(",\"wifi\":{\"mode\":\"");
+  j += net_mode_str();
+  j += F("\",\"configured\":");
+  j += net_wifi_configured() ? '1' : '0';
+  j += F(",\"connected\":");
+  j += net_connected() ? '1' : '0';
+  j += F(",\"ip\":\"");
+  j += net_connected() ? net_ip() : String("");
+  j += F("\",\"rssi\":");
+  j += String(net_connected() ? net_rssi() : 0);
+  j += F(",\"apActive\":");
+  j += net_ap_active() ? '1' : '0';
+  j += F(",\"apSsid\":\"");
+  j += net_ap_ssid();
+  j += F("\",\"apIp\":\"");
+  j += net_ap_ip();
+  j += F("\",\"ssid\":\"");
+  j += g_store.cfg.ssid;
+  j += F("\"}");
+
+  /* Датчик уровня воды */
+  j += F(",\"sensor\":{\"low\":");
+  j += sensor_is_low() ? '1' : '0';
+  j += F(",\"raw\":");
+  j += String(sensor_raw());
+  j += F(",\"pin\":");
+  j += String((int)g_store.cfg.sensorPin);
+  j += F(",\"inv\":");
+  j += String((int)g_store.cfg.sensorActiveLow);
+  j += F(",\"block\":");
+  j += g_store.cfg.blockWhenLow ? '1' : '0';
+  j += '}';
+
+  /* Настройки, нужные интерфейсу */
+  j += F(",\"limits\":{\"maxRun\":");
+  j += String((unsigned)g_store.cfg.maxRunSec);
+  j += F(",\"maxTasks\":");
+  j += String((int)MAX_TASKS);
+  j += F(",\"channels\":");
+  j += String((int)NUM_CHANNELS);
+  j += '}';
+
+  /* Каналы */
+  j += F(",\"ch\":[");
+  for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
+    if (i) j += ',';
+    j += F("{\"i\":");
+    j += String((int)i);
+    j += F(",\"pin\":");
+    j += String((int)g_store.cfg.ch[i].pin);
+    j += F(",\"inv\":");
+    j += String((int)g_store.cfg.ch[i].activeLow);
+    j += F(",\"on\":");
+    j += channels_is_on(i) ? '1' : '0';
+    j += F(",\"rem\":");
+    j += String((unsigned long)channels_remaining_sec(i));
+    j += F(",\"task\":");
+    j += String((int)channels_task(i));
+    j += '}';
+  }
+  j += ']';
+
+  /* Задачи */
+  j += F(",\"tasks\":[");
+  bool first = true;
+  for (uint8_t i = 0; i < MAX_TASKS; i++) {
+    const TaskCfg& t = g_store.tasks[i];
+    if (!t.used) continue;
+    if (!first) j += ',';
+    first = false;
+    j += F("{\"i\":");
+    j += String((int)i);
+    j += F(",\"on\":");
+    j += t.enabled ? '1' : '0';
+    j += F(",\"ch\":");
+    j += String((int)t.channel);
+    j += F(",\"h\":");
+    j += String((int)t.hour);
+    j += F(",\"m\":");
+    j += String((int)t.minute);
+    j += F(",\"dur\":");
+    j += String((unsigned)t.durationSec);
+    j += F(",\"pd\":");
+    j += String((int)t.periodDays);
+    j += F(",\"last\":");
+    j += String((uint32_t)t.lastRun);
+    j += F(",\"next\":");
+    j += String((uint32_t)sched_next_run(t));
+    j += F(",\"st\":\"");
+    j += sched_status_str(i);
+    j += F("\"}");
+  }
+  j += ']';
+
+  j += F(",\"heap\":");
+  j += String((unsigned long)ESP.getFreeHeap());
+  j += F(",\"uptime\":");
+  j += String((unsigned long)(millis() / 1000UL));
+  j += '}';
+  return j;
+}
+
+static String build_config_json() {
+  String j;
+  j.reserve(700);
+  j += F("{\"ssid\":\"");
+  j += g_store.cfg.ssid;
+  j += F("\",\"hasPass\":");
+  j += g_store.cfg.pass[0] ? '1' : '0';
+  j += F(",\"ntp\":\"");
+  j += g_store.cfg.ntpServer;
+  j += F("\",\"tz\":");
+  j += String((int)g_store.cfg.tzOffsetMin);
+  j += F(",\"sensorPin\":");
+  j += String((int)g_store.cfg.sensorPin);
+  j += F(",\"sensorInv\":");
+  j += String((int)g_store.cfg.sensorActiveLow);
+  j += F(",\"sensorPull\":");
+  j += String((int)g_store.cfg.sensorPullup);
+  j += F(",\"blockLow\":");
+  j += String((int)g_store.cfg.blockWhenLow);
+  j += F(",\"maxRun\":");
+  j += String((unsigned)g_store.cfg.maxRunSec);
+  j += F(",\"catchup\":");
+  j += String((int)g_store.cfg.catchupHours);
+  j += F(",\"ch\":[");
+  for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
+    if (i) j += ',';
+    j += F("{\"pin\":");
+    j += String((int)g_store.cfg.ch[i].pin);
+    j += F(",\"inv\":");
+    j += String((int)g_store.cfg.ch[i].activeLow);
+    j += '}';
+  }
+  j += F("]}");
+  return j;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Обработчики                                                        */
+/* ------------------------------------------------------------------ */
+
+static void handle_index() {
+  s_server.sendHeader("Content-Encoding", "gzip");
+  s_server.sendHeader("Cache-Control", "no-store");
+  s_server.send_P(200, "text/html; charset=utf-8", (PGM_P)INDEX_HTML_GZ, INDEX_HTML_GZ_LEN);
+}
+
+static void handle_state() {
+  send_json(200, build_state_json());
+}
+
+static void handle_config_get() {
+  send_json(200, build_config_json());
+}
+
+static void handle_task_save() {
+  long id = arg_long("id", -1);
+  int8_t slot = -1;
+
+  if (id >= 0 && id < MAX_TASKS && g_store.tasks[id].used) {
+    slot = (int8_t)id;
+  } else {
+    for (uint8_t i = 0; i < MAX_TASKS; i++) {
+      if (!g_store.tasks[i].used) { slot = (int8_t)i; break; }
+    }
+    if (slot < 0) { send_err(400, "no_free_slot"); return; }
+  }
+
+  long ch = arg_long("ch", 0);
+  long hour = arg_long("hour", 8);
+  long minute = arg_long("min", 0);
+  long dur = arg_long("dur", 30);
+  long period = arg_long("period", 1);
+  bool enabled = arg_bool("enabled", true);
+
+  if (ch < 0 || ch >= NUM_CHANNELS) { send_err(400, "bad_channel"); return; }
+  if (hour < 0 || hour > 23) { send_err(400, "bad_hour"); return; }
+  if (minute < 0 || minute > 59) { send_err(400, "bad_minute"); return; }
+
+  uint16_t maxDur = g_store.cfg.maxRunSec ? g_store.cfg.maxRunSec : DEFAULT_MAX_RUN_SEC;
+  if (maxDur > TASK_MAX_DURATION_SEC) maxDur = TASK_MAX_DURATION_SEC;
+  if (dur < TASK_MIN_DURATION_SEC) dur = TASK_MIN_DURATION_SEC;
+  if (dur > maxDur) dur = maxDur;
+  if (period < 1) period = 1;
+  if (period > TASK_MAX_PERIOD_DAYS) period = TASK_MAX_PERIOD_DAYS;
+
+  TaskCfg& t = g_store.tasks[slot];
+  bool wasUsed = t.used != 0;
+  t.used = 1;
+  t.enabled = enabled ? 1 : 0;
+  t.channel = (uint8_t)ch;
+  t.hour = (uint8_t)hour;
+  t.minute = (uint8_t)minute;
+  t.durationSec = (uint16_t)dur;
+  t.periodDays = (uint8_t)period;
+  if (!wasUsed) {
+    t.lastRun = 0;
+    t.nextDue = 0;
+  } else {
+    t.nextDue = 0;  // время/период могли измениться - пересчитаем расписание
+  }
+
+  storage_save();
+  send_ok();
+}
+
+static void handle_task_delete() {
+  long id = arg_long("id", -1);
+  if (id < 0 || id >= MAX_TASKS || !g_store.tasks[id].used) {
+    send_err(400, "bad_id");
+    return;
+  }
+  if (channels_is_on(g_store.tasks[id].channel) &&
+      channels_task(g_store.tasks[id].channel) == (int8_t)id) {
+    channels_stop(g_store.tasks[id].channel);
+  }
+  memset(&g_store.tasks[id], 0, sizeof(TaskCfg));
+  storage_save();
+  send_ok();
+}
+
+static void handle_task_run() {
+  long id = arg_long("id", -1);
+  if (id < 0 || id >= MAX_TASKS || !g_store.tasks[id].used) {
+    send_err(400, "bad_id");
+    return;
+  }
+  TaskCfg& t = g_store.tasks[id];
+  // Ручной пуск: включаем поток на настроенную длительность, статус задачи
+  // (lastRun/nextDue) при этом НЕ меняется.
+  StartResult r = channels_start(t.channel, t.durationSec, (int8_t)id);
+  if (r == START_LOW_WATER) { send_err(409, "low_water"); return; }
+  if (r != START_OK) { send_err(400, "start_failed"); return; }
+  send_ok();
+}
+
+static void handle_channel() {
+  long ch = arg_long("ch", -1);
+  long sec = arg_long("sec", 0);
+  if (ch < 0 || ch >= NUM_CHANNELS) { send_err(400, "bad_channel"); return; }
+
+  if (sec <= 0) {
+    channels_stop((uint8_t)ch);
+    send_ok();
+    return;
+  }
+  if (sec > 65535) sec = 65535;
+  StartResult r = channels_start((uint8_t)ch, (uint16_t)sec, -1);
+  if (r == START_LOW_WATER) { send_err(409, "low_water"); return; }
+  if (r != START_OK) { send_err(400, "start_failed"); return; }
+  send_ok();
+}
+
+static void handle_config_save() {
+  Settings& c = g_store.cfg;
+
+  long maxRun = arg_long("maxRun", c.maxRunSec);
+  if (maxRun < 1) maxRun = 1;
+  if (maxRun > 65535) maxRun = 65535;
+
+  long catchup = arg_long("catchup", c.catchupHours);
+  if (catchup < 0) catchup = 0;
+  if (catchup > 24) catchup = 24;
+
+  long tz = arg_long("tz", c.tzOffsetMin);
+  if (tz < -720) tz = -720;
+  if (tz > 840) tz = 840;
+
+  long sensorPin = arg_long("sensorPin", c.sensorPin);
+  if (!pin_valid(sensorPin)) { send_err(400, "bad_sensor_pin"); return; }
+
+  uint8_t newPins[NUM_CHANNELS];
+  uint8_t newInv[NUM_CHANNELS];
+  for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
+    char key[16];
+    snprintf(key, sizeof(key), "ch%u_pin", (unsigned)i);
+    long p = arg_long(key, c.ch[i].pin);
+    if (!pin_valid(p)) { send_err(400, "bad_channel_pin"); return; }
+    newPins[i] = (uint8_t)p;
+
+    snprintf(key, sizeof(key), "ch%u_inv", (unsigned)i);
+    newInv[i] = arg_bool(key, c.ch[i].activeLow) ? 1 : 0;
+  }
+  // проверка на дубликаты пинов
+  for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
+    if (newPins[i] == (uint8_t)sensorPin) { send_err(400, "pin_conflict_sensor"); return; }
+    for (uint8_t k = i + 1; k < NUM_CHANNELS; k++) {
+      if (newPins[i] == newPins[k]) { send_err(400, "pin_conflict"); return; }
+    }
+  }
+
+  for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
+    c.ch[i].pin = newPins[i];
+    c.ch[i].activeLow = newInv[i];
+  }
+
+  c.sensorPin = (uint8_t)sensorPin;
+  c.sensorActiveLow = arg_bool("sensorInv", c.sensorActiveLow) ? 1 : 0;
+  c.sensorPullup = arg_bool("sensorPull", c.sensorPullup) ? 1 : 0;
+  c.blockWhenLow = arg_bool("blockLow", c.blockWhenLow) ? 1 : 0;
+  c.maxRunSec = (uint16_t)maxRun;
+  c.catchupHours = (uint8_t)catchup;
+  c.tzOffsetMin = (int16_t)tz;
+
+  if (s_server.hasArg("ntp")) {
+    String ntp = s_server.arg("ntp");
+    ntp.trim();
+    if (ntp.length() == 0) ntp = DEFAULT_NTP_SERVER;
+    if (ntp.length() > 32) ntp = ntp.substring(0, 32);
+    strncpy(c.ntpServer, ntp.c_str(), sizeof(c.ntpServer) - 1);
+    c.ntpServer[sizeof(c.ntpServer) - 1] = '\0';
+  }
+
+  // Ограничение длительности задач новым предохранителем
+  uint16_t maxDur = c.maxRunSec ? c.maxRunSec : DEFAULT_MAX_RUN_SEC;
+  for (uint8_t i = 0; i < MAX_TASKS; i++) {
+    if (!g_store.tasks[i].used) continue;
+    if (g_store.tasks[i].durationSec > maxDur) g_store.tasks[i].durationSec = maxDur;
+  }
+
+  storage_save();
+  channels_apply_config();
+  net_apply_time_config();
+  send_ok();
+}
+
+static void handle_wifi_save() {
+  String ssid = s_server.hasArg("ssid") ? s_server.arg("ssid") : String("");
+  String pass = s_server.hasArg("pass") ? s_server.arg("pass") : String("");
+  ssid.trim();
+  if (ssid.length() == 0) { send_err(400, "empty_ssid"); return; }
+  if (ssid.length() > 32) ssid = ssid.substring(0, 32);
+  if (pass.length() > 64) pass = pass.substring(0, 64);
+
+  strncpy(g_store.cfg.ssid, ssid.c_str(), sizeof(g_store.cfg.ssid) - 1);
+  g_store.cfg.ssid[sizeof(g_store.cfg.ssid) - 1] = '\0';
+  strncpy(g_store.cfg.pass, pass.c_str(), sizeof(g_store.cfg.pass) - 1);
+  g_store.cfg.pass[sizeof(g_store.cfg.pass) - 1] = '\0';
+
+  storage_save();
+  send_ok();
+  net_request_reboot(1200);
+}
+
+static void handle_factory_reset() {
+  send_ok();
+  storage_factory_reset();
+  net_request_reboot(1200);
+}
+
+static void handle_reboot() {
+  send_ok();
+  net_request_reboot(800);
+}
+
+static void handle_not_found() {
+  String uri = s_server.uri();
+  if (uri.startsWith("/api/")) {
+    send_err(404, "not_found");
+    return;
+  }
+  // Captive portal: любые адреса (включая проверки подключения Android/iOS)
+  // отдаём как главную страницу.
+  handle_index();
+}
+
+void webui_begin() {
+  s_server.on("/", HTTP_GET, handle_index);
+  s_server.on("/index.html", HTTP_GET, handle_index);
+  s_server.on("/favicon.ico", HTTP_GET, []() { s_server.send(204, "text/plain", ""); });
+
+  s_server.on("/api/state", HTTP_GET, handle_state);
+  s_server.on("/api/config", HTTP_GET, handle_config_get);
+  s_server.on("/api/config", HTTP_POST, handle_config_save);
+  s_server.on("/api/task", HTTP_POST, handle_task_save);
+  s_server.on("/api/task/del", HTTP_POST, handle_task_delete);
+  s_server.on("/api/task/run", HTTP_POST, handle_task_run);
+  s_server.on("/api/ch", HTTP_POST, handle_channel);
+  s_server.on("/api/wifi", HTTP_POST, handle_wifi_save);
+  s_server.on("/api/factory", HTTP_POST, handle_factory_reset);
+  s_server.on("/api/reboot", HTTP_POST, handle_reboot);
+
+  s_server.onNotFound(handle_not_found);
+  s_server.begin();
+  Serial.println("[web] сервер запущен на порту 80");
+}
+
+void webui_update() {
+  s_server.handleClient();
+}
