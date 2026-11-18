@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#0f172a">
+<title>Автополив</title>
+<style>
+:root{
+  --bg:#0b1220; --card:#121c2e; --card2:#16233a; --line:#22304a;
+  --txt:#e6edf7; --muted:#8698b8; --accent:#35d07f; --accent2:#1fbf6e;
+  --warn:#ffb020; --err:#ff5d5d; --blue:#4aa8ff;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:radial-gradient(1200px 600px at 15% -10%,#16263f 0%,var(--bg) 55%) no-repeat,var(--bg);
+  color:var(--txt);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  min-height:100vh;-webkit-font-smoothing:antialiased;
+}
+header{
+  position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;
+  gap:12px;padding:12px 16px;background:rgba(11,18,32,.86);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;letter-spacing:.2px}
+.brand .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.hright{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.clock{font-variant-numeric:tabular-nums;font-size:22px;font-weight:700;letter-spacing:.5px}
+.date{font-size:12px;color:var(--muted);text-align:right}
+.badge{
+  display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;
+  font-size:12px;font-weight:600;border:1px solid var(--line);background:var(--card2);white-space:nowrap
+}
+.badge.ok{color:#7ef0b0;border-color:#1d5c3b;background:#0e2a1d}
+.badge.low{color:#ffc9c9;border-color:#6b2430;background:#2a1218}
+.badge.wait{color:#ffe0a8;border-color:#664c14;background:#2a2110}
+nav.tabs{display:flex;gap:6px;padding:10px 16px 0;max-width:980px;margin:0 auto}
+nav.tabs button{
+  flex:1;padding:11px 8px;border:1px solid var(--line);background:var(--card);color:var(--muted);
+  border-radius:12px 12px 0 0;font-size:14px;font-weight:600;cursor:pointer;transition:.15s
+}
+nav.tabs button.active{color:var(--txt);background:var(--card2);border-bottom-color:var(--card2)}
+main{max-width:980px;margin:0 auto;padding:14px 16px 60px}
+section{display:none}
+section.active{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+.card h2{margin:0 0 10px;font-size:15px;font-weight:700;color:var(--txt)}
+.card .hint{color:var(--muted);font-size:12px;margin:6px 0 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+label{display:block;font-size:12px;color:var(--muted);font-weight:600}
+label input,label select{
+  width:100%;margin-top:5px;padding:10px;border-radius:10px;border:1px solid var(--line);
+  background:#0d1728;color:var(--txt);font-size:14px;outline:none
+}
+label input:focus,label select:focus{border-color:var(--blue)}
+label.chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);padding-top:18px}
+label.chk input{width:18px;height:18px;margin:0}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:end;padding-top:14px}
+button{
+  padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--card2);
+  color:var(--txt);font-size:14px;font-weight:600;cursor:pointer;transition:.15s
+}
+button:hover{border-color:#33507a}
+button.primary{background:linear-gradient(180deg,var(--accent),var(--accent2));color:#04220f;border-color:transparent}
+button.blue{background:#14304d;border-color:#1d4a76;color:#bfe0ff}
+button.danger{background:#2a1218;border-color:#6b2430;color:#ffc9c9}
+button.small{padding:7px 10px;font-size:13px}
+button:disabled{opacity:.45;cursor:not-allowed}
+.task{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+.task .top{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.task .title{font-weight:700;font-size:15px}
+.task .meta{color:var(--muted);font-size:12.5px;margin-top:4px;line-height:1.5}
+.task .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.pill{font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:999px;border:1px solid var(--line)}
+.pill.wait{color:#ffe0a8;border-color:#664c14;background:#2a2110}
+.pill.running{color:#bfe9d2;border-color:#1d5c3b;background:#0e2a1d}
+.pill.off{color:var(--muted);background:#101a2b}
+.pill.nosync{color:#ffd0d0;border-color:#6b2430;background:#2a1218}
+.chgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.ch{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px}
+.ch .name{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700}
+.ch .state{margin:8px 0 10px;font-size:13px;color:var(--muted);min-height:20px}
+.ch .row{display:flex;gap:8px}
+.ch .row input{width:100%;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0d1728;color:var(--txt)}
+.ch.on{border-color:#1d5c3b;box-shadow:0 0 0 1px #1d5c3b inset}
+.banner{display:none;margin-bottom:14px;padding:12px;border-radius:12px;font-size:13px;
+  background:#2a2110;border:1px solid #664c14;color:#ffe0a8}
+.banner.show{display:block}
+.toast{
+  position:fixed;left:50%;bottom:18px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
+  background:#12243a;border:1px solid var(--line);color:var(--txt);padding:10px 16px;border-radius:999px;
+  font-size:13px;transition:.25s;z-index:50;max-width:90vw;text-align:center
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.err{border-color:#6b2430;background:#2a1218;color:#ffc9c9}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:13px}
+.kv div:nth-child(odd){color:var(--muted)}
+.sep{height:1px;background:var(--line);margin:14px 0}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:520px){.clock{font-size:19px}.row2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="brand"><span class="dot"></span> Автополив</div>
+    <div class="sub" id="wifiLine">подключение…</div>
+  </div>
+  <div class="hright">
+    <div>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="date" id="date">—</div>
+    </div>
+    <span class="badge wait" id="waterBadge">уровень воды: ?</span>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button id="tabBtnTasks" class="active" data-tab="tasks">Задачи</button>
+  <button id="tabBtnChannels" data-tab="channels">Каналы</button>
+  <button id="tabBtnSettings" data-tab="settings">Настройки</button>
+</nav>
+
+<main>
+  <div class="banner" id="banner"></div>
+
+  <!-- ================= ЗАДАЧИ ================= -->
+  <section id="tab-tasks" class="active">
+    <div class="card">
+      <h2 id="taskFormTitle">Новая задача</h2>
+      <form id="taskForm">
+        <input type="hidden" id="t_id" value="-1">
+        <div class="grid">
+          <label>Канал<select id="t_ch"></select></label>
+          <label>Время полива<input type="time" id="t_time" value="08:00" step="60"></label>
+          <label>Длительность, сек<input type="number" id="t_dur" min="1" max="3600" value="30"></label>
+          <label>Период, дней<input type="number" id="t_period" min="1" max="60" value="1"></label>
+          <label class="chk"><input type="checkbox" id="t_en" checked> Задача активна</label>
+        </div>
+        <div class="actions">
+          <button class="primary" type="submit">Сохранить задачу</button>
+          <button type="button" id="t_reset">Очистить</button>
+        </div>
+        <p class="hint">Период 1 = каждый день, 2 = через день и т.д. Кнопка «Пуск» на карточке включает поток на заданную
+          длительность, не меняя расписание и статус задачи.</p>
+      </form>
+    </div>
+    <div id="tasksList"></div>
+  </section>
+
+  <!-- ================= КАНАЛЫ ================= -->
+  <section id="tab-channels">
+    <div class="card">
+      <h2>Ручное управление каналами</h2>
+      <p class="hint">Кнопка «Пуск» включает помпу на указанное число секунд, «Стоп» — сразу выключает.
+        При низком уровне воды пуск блокируется.</p>
+    </div>
+    <div class="chgrid" id="chGrid"></div>
+  </section>
+
+  <!-- ================= НАСТРОЙКИ ================= -->
+  <section id="tab-settings">
+    <div class="card">
+      <h2>Wi-Fi</h2>
+      <div class="grid">
+        <label>Имя сети (SSID)<input id="s_ssid" maxlength="32" placeholder="Моя сеть 2.4 ГГц"></label>
+        <label>Пароль<input id="s_pass" type="password" maxlength="64" placeholder="оставьте пустым, чтобы не менять"></label>
+      </div>
+      <div class="actions">
+        <button class="primary" id="btnWifi">Сохранить Wi-Fi и перезагрузить</button>
+      </div>
+      <p class="hint">ESP8266 работает только в сетях 2.4 ГГц. После сохранения устройство перезагрузится и
+        подключится к указанной сети; IP-адрес будет показан в шапке.</p>
+    </div>
+
+    <div class="card">
+      <h2>Помпы</h2>
+      <div class="grid" id="pumpSettings"></div>
+      <p class="hint">По умолчанию выбраны пины, которые при включении питания находятся в низком уровне
+        (GPIO4, GPIO5, GPIO12, GPIO14). «Инверсия» включает помпу низким уровнем — так работают многие
+        модули реле.</p>
+    </div>
+
+    <div class="card">
+      <h2>Датчик уровня воды</h2>
+      <div class="grid">
+        <label>Пин датчика<input type="number" id="s_sensorPin" min="0" max="16" value="13"></label>
+        <label class="chk"><input type="checkbox" id="s_sensorPull" checked> Внутренняя подтяжка к +3.3 В</label>
+        <label class="chk"><input type="checkbox" id="s_sensorInv" checked> Низкий уровень = «вода на исходе»</label>
+        <label class="chk"><input type="checkbox" id="s_blockLow" checked> Блокировать полив при низком уровне</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Время и защита</h2>
+      <div class="row2">
+        <label>NTP-сервер<input id="s_ntp" maxlength="32" value="pool.ntp.org"></label>
+        <label>Смещение от UTC, минут<input type="number" id="s_tz" min="-720" max="840" step="30" value="60"></label>
+        <label>Максимум секунд на включение<input type="number" id="s_maxRun" min="1" max="65535" value="600"></label>
+        <label>Догоняющий полив, часов<input type="number" id="s_catchup" min="0" max="24" value="6"></label>
+      </div>
+      <div class="actions">
+        <button class="primary" id="btnCfg">Сохранить настройки</button>
+      </div>
+      <p class="hint">Смещение от UTC: Нидерланды — 60 (зимой) и 120 (летом). «Догоняющий полив» — сколько часов
+        после планового времени ещё можно полить, если устройство было выключено.</p>
+    </div>
+
+    <div class="card">
+      <h2>Информация</h2>
+      <div class="kv" id="infoBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Опасная зона</h2>
+      <div class="actions" style="padding-top:0">
+        <button class="blue" id="btnReboot">Перезагрузить</button>
+        <button class="danger" id="btnFactory">Сброс к заводским настройкам</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let st = null;
+let cfgLoaded = false;
+let chBuilt = false;
+
+const $ = id => document.getElementById(id);
+
+function toast(msg, isErr){
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(t._h);
+  t._h = setTimeout(()=>{ t.className = 'toast' + (isErr?' err':''); }, 2600);
+}
+
+async function getJson(url){
+  const r = await fetch(url, {cache:'no-store'});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return await r.json();
+}
+
+async function post(url, data){
+  const body = new URLSearchParams();
+  for(const k in data) body.append(k, (typeof data[k] === 'boolean') ? (data[k] ? '1' : '0') : data[k]);
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body});
+  let j = {};
+  try { j = await r.json(); } catch(e) {}
+  if(!r.ok || j.ok === false) throw new Error(j.error || ('HTTP '+r.status));
+  return j;
+}
+
+function errText(e){
+  const map = {
+    low_water:'Низкий уровень воды — полив заблокирован',
+    no_free_slot:'Нет свободных слотов задач',
+    bad_channel:'Неверный канал',
+    bad_id:'Задача не найдена',
+    pin_conflict:'Пины помп не должны совпадать',
+    pin_conflict_sensor:'Пин датчика совпадает с пином помпы',
+    bad_channel_pin:'Недопустимый пин помпы (нельзя GPIO6…GPIO11)',
+    bad_sensor_pin:'Недопустимый пин датчика',
+    empty_ssid:'Укажите имя сети'
+  };
+  return map[e.message] || ('Ошибка: ' + e.message);
+}
+
+/* ---------- вкладки ---------- */
+document.querySelectorAll('nav.tabs button').forEach(b=>{
+  b.addEventListener('click', ()=> selectTab(b.dataset.tab));
+});
+function selectTab(name){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
+  document.querySelectorAll('main section').forEach(s=>s.classList.toggle('active', s.id==='tab-'+name));
+}
+
+/* ---------- шапка ---------- */
+function renderHeader(){
+  $('clock').textContent = st.time;
+  $('date').textContent = st.date;
+  const wb = $('waterBadge');
+  if(st.sensor.low){
+    wb.className = 'badge low';
+    wb.textContent = 'уровень воды: НИЗКИЙ';
+  } else {
+    wb.className = 'badge ok';
+    wb.textContent = 'уровень воды: ОК';
+  }
+  let line = '';
+  if(st.wifi.connected){
+    line = 'Wi-Fi: ' + st.wifi.ssid + ' · ' + st.wifi.ip + ' · ' + st.wifi.rssi + ' dBm';
+  } else if(st.wifi.apActive){
+    line = 'Режим настройки · точка доступа ' + st.wifi.apSsid + ' · ' + st.wifi.apIp;
+  } else {
+    line = 'Wi-Fi не подключён';
+  }
+  $('wifiLine').textContent = line;
+
+  const b = $('banner');
+  if(!st.wifi.configured){
+    b.className = 'banner show';
+    b.innerHTML = '<b>Wi-Fi не настроен.</b> Подключитесь к открытой сети <b>' + st.wifi.apSsid +
+      '</b> и укажите данные вашей сети во вкладке «Настройки» — страница откроется автоматически.';
+  } else if(!st.timeValid){
+    b.className = 'banner show';
+    b.innerHTML = '<b>Нет синхронизации времени.</b> Расписание полива недоступно, пока не будет получено время по NTP.';
+  } else {
+    b.className = 'banner';
+  }
+}
+
+/* ---------- задачи ---------- */
+const stText = {wait:'ожидание', running:'полив', off:'выключена', nosync:'нет времени', free:'—'};
+
+function fmtEpoch(sec){
+  if(!sec) return '—';
+  const d = new Date(sec*1000);
+  const p = n => String(n).padStart(2,'0');
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+
+function renderTasks(){
+  const box = $('tasksList');
+  if(!st.tasks.length){
+    box.innerHTML = '<div class="card"><p class="hint" style="margin:0">Задач пока нет — добавьте первую выше.</p></div>';
+    return;
+  }
+  let html = '';
+  for(const t of st.tasks){
+    const chName = 'Канал ' + (t.ch+1) + ' (GPIO' + st.ch[t.ch].pin + ')';
+    html += '<div class="task">' +
+      '<div class="top"><div>' +
+        '<div class="title">' + chName + ' · ' + String(t.h).padStart(2,'0') + ':' + String(t.m).padStart(2,'0') + '</div>' +
+        '<div class="meta">Длительность: <b>' + t.dur + ' с</b> · Период: <b>' + t.pd + ' дн.</b><br>' +
+          'Последний полив: ' + fmtEpoch(t.last) + '<br>' +
+          'Следующий пуск: ' + fmtEpoch(t.next) + '</div>' +
+      '</div>' +
+      '<span class="pill ' + t.st + '">' + (stText[t.st] || t.st) + '</span></div>' +
+      '<div class="btns">' +
+        '<button class="small primary" data-act="run" data-id="' + t.i + '">▶ Пуск</button>' +
+        '<button class="small" data-act="edit" data-id="' + t.i + '">Изменить</button>' +
+        '<button class="small danger" data-act="del" data-id="' + t.i + '">Удалить</button>' +
+      '</div></div>';
+  }
+  box.innerHTML = html;
+  box.querySelectorAll('button[data-act]').forEach(b=>{
+    b.addEventListener('click', ()=> taskAction(b.dataset.act, parseInt(b.dataset.id,10)));
+  });
+}
+
+async function taskAction(act, id){
+  const t = st.tasks.find(x=>x.i===id);
+  try{
+    if(act==='run'){
+      await post('/api/task/run', {id});
+      toast('Полив запущен');
+    } else if(act==='del'){
+      if(!confirm('Удалить задачу?')) return;
+      await post('/api/task/del', {id});
+      toast('Задача удалена');
+    } else if(act==='edit'){
+      $('t_id').value = id;
+      $('t_ch').value = t.ch;
+      $('t_time').value = String(t.h).padStart(2,'0') + ':' + String(t.m).padStart(2,'0');
+      $('t_dur').value = t.dur;
+      $('t_period').value = t.pd;
+      $('t_en').checked = !!t.on;
+      $('taskFormTitle').textContent = 'Редактирование задачи #' + (id+1);
+      window.scrollTo({top:0, behavior:'smooth'});
+    }
+    await load();
+  }catch(e){ toast(errText(e), true); }
+}
+
+function resetTaskForm(){
+  $('t_id').value = '-1';
+  $('t_ch').value = '0';
+  $('t_time').value = '08:00';
+  $('t_dur').value = '30';
+  $('t_period').value = '1';
+  $('t_en').checked = true;
+  $('taskFormTitle').textContent = 'Новая задача';
+}
+$('t_reset').addEventListener('click', resetTaskForm);
+
+$('taskForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const time = $('t_time').value || '08:00';
+  const parts = time.split(':');
+  try{
+    await post('/api/task', {
+      id: parseInt($('t_id').value,10),
+      ch: parseInt($('t_ch').value,10),
+      hour: parseInt(parts[0],10) || 0,
+      min: parseInt(parts[1],10) || 0,
+      dur: parseInt($('t_dur').value,10) || 1,
+      period: parseInt($('t_period').value,10) || 1,
+      enabled: $('t_en').checked
+    });
+    toast('Задача сохранена');
+    resetTaskForm();
+    await load();
+  }catch(err){ toast(errText(err), true); }
+});
+
+/* ---------- каналы ---------- */
+function buildChannels(){
+  const g = $('chGrid');
+  let html = '';
+  for(let i=0;i<st.limits.channels;i++){
+    html += '<div class="ch" id="ch' + i + '">' +
+      '<div class="name"><span>Канал ' + (i+1) + '</span><span class="pill off" id="chp' + i + '">выкл</span></div>' +
+      '<div class="state">GPIO' + st.ch[i].pin + ' <span id="chs' + i + '"></span></div>' +
+      '<div class="row"><input type="number" id="chsec' + i + '" min="1" max="' + st.limits.maxRun + '" value="30">' +
+      '<button class="small primary" data-ch="' + i + '" data-sec="1">▶</button></div>' +
+      '<div class="row" style="margin-top:8px"><button class="small" data-ch="' + i + '" data-sec="0">Стоп</button></div>' +
+      '</div>';
+  }
+  g.innerHTML = html;
+  g.querySelectorAll('button[data-ch]').forEach(b=>{
+    b.addEventListener('click', async ()=>{
+      const i = parseInt(b.dataset.ch,10);
+      const run = b.dataset.sec === '1';
+      const sec = run ? (parseInt($('chsec'+i).value,10) || 0) : 0;
+      try{
+        await post('/api/ch', {ch:i, sec});
+        toast(run ? ('Канал ' + (i+1) + ' включён на ' + sec + ' с') : ('Канал ' + (i+1) + ' остановлен'));
+        await load();
+      }catch(e){ toast(errText(e), true); }
+    });
+  });
+  chBuilt = true;
+}
+
+function renderChannels(){
+  if(!chBuilt) buildChannels();
+  for(let i=0;i<st.limits.channels;i++){
+    const c = st.ch[i];
+    const card = $('ch'+i);
+    if(!card) continue;
+    card.classList.toggle('on', !!c.on);
+    const pill = $('chp'+i);
+    pill.className = 'pill ' + (c.on ? 'running' : 'off');
+    pill.textContent = c.on ? 'включён' : 'выкл';
+    let s = '';
+    if(c.on){
+      s = '· осталось ' + c.rem + ' с';
+      if(c.task >= 0) s += ' (задача #' + (c.task+1) + ')';
+    }
+    $('chs'+i).textContent = s;
+  }
+}
+
+/* ---------- настройки ---------- */
+async function loadConfig(){
+  try{
+    const c = await getJson('/api/config');
+    $('s_ssid').value = c.ssid || '';
+    $('s_ntp').value = c.ntp || 'pool.ntp.org';
+    $('s_tz').value = c.tz;
+    $('s_sensorPin').value = c.sensorPin;
+    $('s_sensorInv').checked = !!c.sensorInv;
+    $('s_sensorPull').checked = !!c.sensorPull;
+    $('s_blockLow').checked = !!c.blockLow;
+    $('s_maxRun').value = c.maxRun;
+    $('s_catchup').value = c.catchup;
+
+    let html = '';
+    for(let i=0;i<c.ch.length;i++){
+      html += '<div><label>Канал ' + (i+1) + ', GPIO<input type="number" id="s_chpin' + i +
+        '" min="0" max="16" value="' + c.ch[i].pin + '"></label>' +
+        '<label class="chk"><input type="checkbox" id="s_chinv' + i + '"' + (c.ch[i].inv ? ' checked' : '') +
+        '> Инверсия (вкл. низким)</label></div>';
+    }
+    $('pumpSettings').innerHTML = html;
+    cfgLoaded = true;
+  }catch(e){ /* повторим на следующем тике */ }
+}
+
+$('btnCfg').addEventListener('click', async ()=>{
+  const data = {
+    ntp: $('s_ntp').value,
+    tz: parseInt($('s_tz').value,10) || 0,
+    sensorPin: parseInt($('s_sensorPin').value,10),
+    sensorInv: $('s_sensorInv').checked,
+    sensorPull: $('s_sensorPull').checked,
+    blockLow: $('s_blockLow').checked,
+    maxRun: parseInt($('s_maxRun').value,10) || 600,
+    catchup: parseInt($('s_catchup').value,10) || 0
+  };
+  for(let i=0;i<st.limits.channels;i++){
+    data['ch'+i+'_pin'] = parseInt($('s_chpin'+i).value,10);
+    data['ch'+i+'_inv'] = $('s_chinv'+i).checked;
+  }
+  try{
+    await post('/api/config', data);
+    toast('Настройки сохранены');
+    await load();
+  }catch(e){ toast(errText(e), true); }
+});
+
+$('btnWifi').addEventListener('click', async ()=>{
+  const ssid = $('s_ssid').value.trim();
+  const pass = $('s_pass').value;
+  if(!ssid){ toast('Укажите имя сети', true); return; }
+  try{
+    await post('/api/wifi', {ssid, pass});
+    toast('Сохранено, перезагрузка…');
+  }catch(e){ toast(errText(e), true); }
+});
+
+$('btnReboot').addEventListener('click', async ()=>{
+  if(!confirm('Перезагрузить контроллер?')) return;
+  try{ await post('/api/reboot', {}); toast('Перезагрузка…'); }catch(e){ toast(errText(e), true); }
+});
+
+$('btnFactory').addEventListener('click', async ()=>{
+  if(!confirm('Сбросить ВСЕ настройки и задачи?')) return;
+  try{ await post('/api/factory', {}); toast('Сброс выполнен, перезагрузка…'); }catch(e){ toast(errText(e), true); }
+});
+
+function renderInfo(){
+  $('infoBox').innerHTML =
+    '<div>Прошивка</div><div>' + st.name + ' ' + st.fw + '</div>' +
+    '<div>Режим Wi-Fi</div><div>' + st.wifi.mode + '</div>' +
+    '<div>IP</div><div>' + (st.wifi.connected ? st.wifi.ip : '—') + '</div>' +
+    '<div>Точка доступа</div><div>' + (st.wifi.apActive ? st.wifi.apSsid + ' / ' + st.wifi.apIp : 'выключена') + '</div>' +
+    '<div>Датчик (сырое значение)</div><div>' + st.sensor.raw + ' @ GPIO' + st.sensor.pin + '</div>' +
+    '<div>Свободная память</div><div>' + st.heap + ' байт</div>' +
+    '<div>Время работы</div><div>' + Math.floor(st.uptime/3600) + ' ч ' + Math.floor((st.uptime%3600)/60) + ' мин</div>';
+}
+
+/* ---------- цикл обновления ---------- */
+async function load(){
+  try{
+    st = await getJson('/api/state');
+  }catch(e){
+    $('wifiLine').textContent = 'нет связи с контроллером…';
+    return;
+  }
+  if(!cfgLoaded) await loadConfig();
+
+  if(!chBuilt && $('t_ch').options.length === 0){
+    let opts = '';
+    for(let i=0;i<st.limits.channels;i++) opts += '<option value="' + i + '">Канал ' + (i+1) + ' (GPIO' + st.ch[i].pin + ')</option>';
+    $('t_ch').innerHTML = opts;
+    $('t_dur').max = st.limits.maxRun;
+  }
+
+  renderHeader();
+  renderTasks();
+  renderChannels();
+  renderInfo();
+
+  if(!st.wifi.configured && !window._autoSetup){
+    window._autoSetup = true;
+    selectTab('settings');
+  }
+}
+
+load();
+setInterval(load, 2000);
+</script>
+</body>
+</html>

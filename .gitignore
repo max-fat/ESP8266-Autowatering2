@@ -1,0 +1,16 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# локальная сборка (tools/build_firmware.sh)
+build/
+
+# прочее
+node_modules/
+*.pyc
+__pycache__/
+.DS_Store
+
+# хост-тесты
+tests/host/test_logic
