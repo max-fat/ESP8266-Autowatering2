@@ -11,13 +11,13 @@
 #include <stdint.h>
 
 #define FW_NAME     "ESP8266-Autowatering2"
-#define FW_VERSION  "1.0.0"
+#define FW_VERSION  "1.2.0"
 
 /* ---------- Ограничения ---------- */
 #define NUM_CHANNELS      4       // число помп (каналов)
 #define MAX_TASKS         8       // максимум задач полива
 #define STORE_MAGIC       0x41574532UL   /* "AWE2" */
-#define STORE_VERSION     1
+#define STORE_VERSION     2   /* изменения формата = сброс к умолчаниям */
 #define EEPROM_BYTES      1024    // размер эмулированного EEPROM под наше хранилище
 
 /* ---------- Умолчания для пинов ----------
@@ -37,7 +37,7 @@
 /* ---------- Умолчания параметров ---------- */
 #define DEFAULT_MAX_RUN_SEC      600    // предохранитель: максимум 10 минут на канал
 #define DEFAULT_CATCHUP_HOURS    6      // сколько часов после планового времени ещё можно полить
-#define DEFAULT_TZ_OFFSET_MIN    60     // UTC+1 (Нидерланды, зимнее время)
+#define DEFAULT_TZ_OFFSET_MIN    180    // UTC+3 (МСК) - см. настройки
 #define DEFAULT_NTP_SERVER       "pool.ntp.org"
 #define DEFAULT_AP_PREFIX        "AutoWater-"
 
@@ -56,19 +56,19 @@ struct TaskCfg {
   uint8_t  used;         // слот занят
   uint8_t  enabled;      // задача активна
   uint8_t  channel;      // 0..NUM_CHANNELS-1
-  uint8_t  hour;         // время старта, часы (0..23)
+  uint8_t  hour;         // время старта, часы (0..23) по местному времени
   uint8_t  minute;       // время старта, минуты (0..59)
   uint8_t  periodDays;   // период повторения в днях (1..TASK_MAX_PERIOD_DAYS)
   uint16_t durationSec;  // длительность полива, сек
-  uint32_t lastRun;      // локальное unix-время последнего полива (0 = ещё не поливалась)
-  uint32_t nextDue;      // локальное unix-время следующего полива (0 = пересчитать)
+  uint32_t lastRun;      // локальные секунды эпохи последнего полива (0 = ещё не было)
+  uint32_t nextDue;      // локальные секунды эпохи следующего полива (0 = пересчитать)
 };
 
 struct Settings {
   char     ssid[33];
   char     pass[65];
   char     ntpServer[33];
-  int16_t  tzOffsetMin;      // смещение от UTC в минутах
+  int16_t  tzOffsetMin;      // смещение от UTC в минутах (180 = UTC+3, МСК)
   uint8_t  sensorPin;
   uint8_t  sensorActiveLow;  // 1 = НИЗКИЙ уровень сигнала означает "вода на исходе"
   uint8_t  sensorPullup;     // 1 = включить внутреннюю подтяжку к +3.3 В

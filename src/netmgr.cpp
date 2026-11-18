@@ -38,18 +38,21 @@ static void build_ap_ssid() {
 }
 
 static void start_ntp() {
-  long tz = (long)g_store.cfg.tzOffsetMin * 60L;
+  // Пояс НЕ передаём ядру: внутри прошивки время всегда UTC, а смещение
+  // применяется в src/clock.cpp. Так поведение одинаково на ядрах 2.4.x и 3.x.
   const char* srv = g_store.cfg.ntpServer[0] ? g_store.cfg.ntpServer : DEFAULT_NTP_SERVER;
-  configTime(tz, 0, srv);
+  configTime(0, 0, srv);
   s_lastNtp = millis();
   s_ntpStarted = true;
-  Serial.printf("[net] NTP: %s, TZ offset %ld min\n", srv, (long)g_store.cfg.tzOffsetMin);
+  Serial.printf("[net] NTP: %s (UTC), пояс %d мин\n", srv, (int)g_store.cfg.tzOffsetMin);
 }
 
 void net_apply_time_config() {
-  if (net_connected()) {
-    s_ntpStarted = false;   // пересинхронизировать при следующем тике
-  }
+  s_ntpStarted = false;   // пересинхронизировать при следующем тике net_update()
+}
+
+void net_force_ntp_sync() {
+  s_ntpStarted = false;
 }
 
 static void start_ap() {

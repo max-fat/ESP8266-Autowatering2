@@ -31,3 +31,6 @@ void net_request_reboot(uint32_t delayMs = 800);
 
 // Применить новые параметры времени (NTP-сервер / смещение зоны).
 void net_apply_time_config();
+
+// Принудительно перезапросить время у NTP.
+void net_force_ntp_sync();

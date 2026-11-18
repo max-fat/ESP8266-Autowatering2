@@ -144,8 +144,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
           <button class="primary" type="submit">Сохранить задачу</button>
           <button type="button" id="t_reset">Очистить</button>
         </div>
-        <p class="hint">Период 1 = каждый день, 2 = через день и т.д. Кнопка «Пуск» на карточке включает поток на заданную
-          длительность, не меняя расписание и статус задачи.</p>
+        <p class="hint">Время указывается <b>по местному времени</b> контроллера (часовой пояс — во вкладке
+          «Настройки»). Период 1 = каждый день, 2 = через день и т.д. Кнопка «Пуск» на карточке включает поток
+          на заданную длительность, не меняя расписание и статус задачи.</p>
       </form>
     </div>
     <div id="tasksList"></div>
@@ -198,15 +199,22 @@ button:disabled{opacity:.45;cursor:not-allowed}
       <h2>Время и защита</h2>
       <div class="row2">
         <label>NTP-сервер<input id="s_ntp" maxlength="32" value="pool.ntp.org"></label>
-        <label>Смещение от UTC, минут<input type="number" id="s_tz" min="-720" max="840" step="30" value="60"></label>
+        <label>Часовой пояс<select id="s_tz"></select></label>
         <label>Максимум секунд на включение<input type="number" id="s_maxRun" min="1" max="65535" value="600"></label>
         <label>Догоняющий полив, часов<input type="number" id="s_catchup" min="0" max="24" value="6"></label>
       </div>
       <div class="actions">
         <button class="primary" id="btnCfg">Сохранить настройки</button>
+        <button class="blue" id="btnPhoneTime">Время с телефона</button>
+        <button class="blue" id="btnPhoneTimeTz">Время и пояс с телефона</button>
       </div>
-      <p class="hint">Смещение от UTC: Нидерланды — 60 (зимой) и 120 (летом). «Догоняющий полив» — сколько часов
-        после планового времени ещё можно полить, если устройство было выключено.</p>
+      <p class="hint" id="clockLine">Время контроллера: —</p>
+      <p class="hint">Часовой пояс выбирается в формате UTC: UTC+00:00, UTC+03:00 (Москва, МСК) и т.д.
+        По умолчанию — <b>UTC+3 (МСК)</b>. Всё время в задачах задаётся <b>по местному времени</b> контроллера,
+        то есть по выбранному здесь поясу. У ESP8266 нет часов с батарейкой, поэтому после включения время
+        берётся по NTP, а если интернета нет — нажмите «Время с телефона»: браузер передаст текущее время
+        (и, при желании, свой часовой пояс). «Догоняющий полив» — сколько часов после планового времени
+        ещё можно полить, если устройство было выключено.</p>
     </div>
 
     <div class="card">
@@ -230,6 +238,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 let st = null;
 let cfgLoaded = false;
 let chBuilt = false;
+const chStopSeq = [];        // последний увиденный seq выключения по каналам
+const chSuppressUntil = [];  // до какого времени не дублировать уведомление
 
 const $ = id => document.getElementById(id);
 
@@ -272,6 +282,59 @@ function errText(e){
   return map[e.message] || ('Ошибка: ' + e.message);
 }
 
+/* ---------- часовой пояс (UTC±HH:MM) ---------- */
+const TZ_NAMES = {
+  '-720':'UTC-12:00 (Бейкер)', '-660':'UTC-11:00 (Паго-Паго)', '-600':'UTC-10:00 (Гонолулу)',
+  '-540':'UTC-09:00 (Аляска)', '-480':'UTC-08:00 (Лос-Анджелес)', '-420':'UTC-07:00 (Денвер)',
+  '-360':'UTC-06:00 (Чикаго)', '-300':'UTC-05:00 (Нью-Йорк)', '-240':'UTC-04:00 (Сантьяго)',
+  '-210':'UTC-03:30 (Ньюфаундленд)', '-180':'UTC-03:00 (Сан-Паулу)', '-120':'UTC-02:00',
+  '-60':'UTC-01:00 (Азоры)', '0':'UTC+00:00 (Лондон)',
+  '60':'UTC+01:00 (Берлин, Париж)', '120':'UTC+02:00 (Киев, Афины)',
+  '180':'UTC+03:00 (Москва, МСК)', '210':'UTC+03:30 (Тегеран)', '240':'UTC+04:00 (Самара, Баку)',
+  '270':'UTC+04:30 (Кабул)', '300':'UTC+05:00 (Екатеринбург)', '330':'UTC+05:30 (Дели)',
+  '345':'UTC+05:45 (Катманду)', '360':'UTC+06:00 (Омск, Алматы)', '390':'UTC+06:30 (Янгон)',
+  '420':'UTC+07:00 (Красноярск, Бангкок)', '480':'UTC+08:00 (Иркутск, Пекин)',
+  '540':'UTC+09:00 (Якутск, Токио)', '570':'UTC+09:30 (Дарвин)', '600':'UTC+10:00 (Владивосток)',
+  '630':'UTC+10:30 (Лорд-Хау)', '660':'UTC+11:00 (Магадан)', '720':'UTC+12:00 (Камчатка)',
+  '780':'UTC+13:00 (Тонга)', '840':'UTC+14:00 (Киритимати)'
+};
+
+function tzLabel(min){
+  min = parseInt(min, 10) || 0;
+  if(TZ_NAMES[String(min)]) return TZ_NAMES[String(min)];
+  const sign = min < 0 ? '-' : '+';
+  const a = Math.abs(min);
+  const p = n => String(n).padStart(2,'0');
+  return 'UTC' + sign + p(Math.floor(a/60)) + ':' + p(a%60);
+}
+
+function buildTzOptions(){
+  const sel = $('s_tz');
+  if(!sel) return;
+  const list = [];
+  for(let m = -720; m <= 840; m += 30) list.push(m);
+  if(!list.includes(345)) list.push(345);
+  list.sort((a,b)=>a-b);
+  sel.innerHTML = list.map(m=>'<option value="' + m + '">' + tzLabel(m) + '</option>').join('');
+}
+
+/* Передать текущее время (и при желании часовой пояс) с телефона на контроллер.
+   У ESP8266 нет часов с батарейкой: без интернета это самый быстрый способ
+   получить правильное время. */
+async function sendPhoneTime(withTz){
+  const nowUtc = Math.floor(Date.now()/1000);
+  const data = {now: nowUtc};
+  if(withTz) data.tz = -new Date().getTimezoneOffset();
+  try{
+    const r = await post('/api/time', data);
+    toast('Время контроллера: ' + (r.time || '?') + ' ' + (r.date || '') + ' (' + (r.tz || '') + ')');
+    if(withTz) cfgLoaded = false;   // пояс мог измениться - перечитаем настройки
+    await load();
+  }catch(e){
+    toast(errText(e), true);
+  }
+}
+
 /* ---------- вкладки ---------- */
 document.querySelectorAll('nav.tabs button').forEach(b=>{
   b.addEventListener('click', ()=> selectTab(b.dataset.tab));
@@ -304,27 +367,29 @@ function renderHeader(){
   $('wifiLine').textContent = line;
 
   const b = $('banner');
+  const timeBtn = '<button class="small blue" onclick="sendPhoneTime(true)">Взять время с телефона</button>';
   if(!st.wifi.configured){
     b.className = 'banner show';
     b.innerHTML = '<b>Wi-Fi не настроен.</b> Подключитесь к открытой сети <b>' + st.wifi.apSsid +
-      '</b> и укажите данные вашей сети во вкладке «Настройки» — страница откроется автоматически.';
+      '</b> и укажите данные вашей сети во вкладке «Настройки». Пока нет интернета, время можно ' +
+      'передать с телефона: ' + timeBtn;
   } else if(!st.timeValid){
     b.className = 'banner show';
-    b.innerHTML = '<b>Нет синхронизации времени.</b> Расписание полива недоступно, пока не будет получено время по NTP.';
+    b.innerHTML = '<b>Нет синхронизации времени.</b> Расписание полива недоступно, пока время не ' +
+      'получено по NTP или с телефона: ' + timeBtn;
   } else {
     b.className = 'banner';
+  }
+  const cl = $('clockLine');
+  if(cl){
+    const src = st.timeSrc === 'ntp' ? 'по NTP' : (st.timeSrc === 'manual' ? 'с телефона' : 'нет');
+    cl.innerHTML = 'Время контроллера: <b>' + st.time + '</b> ' + st.date + ' · источник: ' + src +
+      ' · пояс ' + tzLabel(st.tz);
   }
 }
 
 /* ---------- задачи ---------- */
 const stText = {wait:'ожидание', running:'полив', off:'выключена', nosync:'нет времени', free:'—'};
-
-function fmtEpoch(sec){
-  if(!sec) return '—';
-  const d = new Date(sec*1000);
-  const p = n => String(n).padStart(2,'0');
-  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
-}
 
 function renderTasks(){
   const box = $('tasksList');
@@ -339,8 +404,8 @@ function renderTasks(){
       '<div class="top"><div>' +
         '<div class="title">' + chName + ' · ' + String(t.h).padStart(2,'0') + ':' + String(t.m).padStart(2,'0') + '</div>' +
         '<div class="meta">Длительность: <b>' + t.dur + ' с</b> · Период: <b>' + t.pd + ' дн.</b><br>' +
-          'Последний полив: ' + fmtEpoch(t.last) + '<br>' +
-          'Следующий пуск: ' + fmtEpoch(t.next) + '</div>' +
+          'Последний полив: ' + (t.lastStr || '—') + '<br>' +
+          'Следующий пуск: ' + (t.nextStr || '—') + '</div>' +
       '</div>' +
       '<span class="pill ' + t.st + '">' + (stText[t.st] || t.st) + '</span></div>' +
       '<div class="btns">' +
@@ -431,7 +496,13 @@ function buildChannels(){
       const sec = run ? (parseInt($('chsec'+i).value,10) || 0) : 0;
       try{
         await post('/api/ch', {ch:i, sec});
-        toast(run ? ('Канал ' + (i+1) + ' включён на ' + sec + ' с') : ('Канал ' + (i+1) + ' остановлен'));
+        if(run){
+          toast('Канал ' + (i+1) + ' включён на ' + sec + ' с');
+        } else {
+          // сразу даём обратную связь, а событие с устройства (≤2 с) не дублируем
+          chSuppressUntil[i] = Date.now() + 5000;
+          toast('Канал ' + (i+1) + ' остановлен');
+        }
         await load();
       }catch(e){ toast(errText(e), true); }
     });
@@ -439,10 +510,34 @@ function buildChannels(){
   chBuilt = true;
 }
 
+/* Уведомление о выключении канала: устройство сообщает причину
+   (timer - истекло время, manual - остановили вручную, low - низкий уровень воды). */
+function notifyChannelStopped(i, rsn, run){
+  const name = 'Канал ' + (i+1);
+  if(rsn === 'timer'){
+    toast(name + ': полив завершён' + (run ? ' (' + run + ' с)' : ''));
+  } else if(rsn === 'low'){
+    toast(name + ': остановлен — низкий уровень воды', true);
+  } else if(rsn === 'manual'){
+    toast(name + ': остановлен');
+  }
+}
+
 function renderChannels(){
   if(!chBuilt) buildChannels();
   for(let i=0;i<st.limits.channels;i++){
     const c = st.ch[i];
+
+    // появление нового события выключения - показываем уведомление
+    const seq = c.seq || 0;
+    if(chStopSeq[i] === undefined){
+      chStopSeq[i] = seq;                       // первый опрос - без уведомлений
+    } else if(seq !== chStopSeq[i]){
+      chStopSeq[i] = seq;
+      const until = chSuppressUntil[i] || 0;
+      if(Date.now() > until && c.rsn) notifyChannelStopped(i, c.rsn, c.run || 0);
+    }
+
     const card = $('ch'+i);
     if(!card) continue;
     card.classList.toggle('on', !!c.on);
@@ -464,7 +559,16 @@ async function loadConfig(){
     const c = await getJson('/api/config');
     $('s_ssid').value = c.ssid || '';
     $('s_ntp').value = c.ntp || 'pool.ntp.org';
-    $('s_tz').value = c.tz;
+    buildTzOptions();
+    const sel = $('s_tz');
+    sel.value = String(c.tz);
+    if(sel.value !== String(c.tz)){   // нестандартное смещение - добавим вариант
+      const opt = document.createElement('option');
+      opt.value = String(c.tz);
+      opt.textContent = tzLabel(c.tz);
+      sel.appendChild(opt);
+      sel.value = String(c.tz);
+    }
     $('s_sensorPin').value = c.sensorPin;
     $('s_sensorInv').checked = !!c.sensorInv;
     $('s_sensorPull').checked = !!c.sensorPull;
@@ -506,6 +610,9 @@ $('btnCfg').addEventListener('click', async ()=>{
   }catch(e){ toast(errText(e), true); }
 });
 
+$('btnPhoneTime').addEventListener('click', ()=> sendPhoneTime(false));
+$('btnPhoneTimeTz').addEventListener('click', ()=> sendPhoneTime(true));
+
 $('btnWifi').addEventListener('click', async ()=>{
   const ssid = $('s_ssid').value.trim();
   const pass = $('s_pass').value;
@@ -532,6 +639,8 @@ function renderInfo(){
     '<div>Режим Wi-Fi</div><div>' + st.wifi.mode + '</div>' +
     '<div>IP</div><div>' + (st.wifi.connected ? st.wifi.ip : '—') + '</div>' +
     '<div>Точка доступа</div><div>' + (st.wifi.apActive ? st.wifi.apSsid + ' / ' + st.wifi.apIp : 'выключена') + '</div>' +
+    '<div>Часовой пояс</div><div>' + tzLabel(st.tz) + '</div>' +
+    '<div>Источник времени</div><div>' + (st.timeSrc === 'ntp' ? 'NTP' : (st.timeSrc === 'manual' ? 'телефон' : 'нет времени')) + '</div>' +
     '<div>Датчик (сырое значение)</div><div>' + st.sensor.raw + ' @ GPIO' + st.sensor.pin + '</div>' +
     '<div>Свободная память</div><div>' + st.heap + ' байт</div>' +
     '<div>Время работы</div><div>' + Math.floor(st.uptime/3600) + ' ч ' + Math.floor((st.uptime%3600)/60) + ' мин</div>';
@@ -565,6 +674,7 @@ async function load(){
   }
 }
 
+buildTzOptions();
 load();
 setInterval(load, 2000);
 </script>

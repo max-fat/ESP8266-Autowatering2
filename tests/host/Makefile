@@ -5,7 +5,7 @@
 
 CXX      ?= g++
 CXXFLAGS := -std=c++11 -O1 -g -Wall -Wextra -Wno-unused-parameter -I.
-SRC      := test_logic.cpp ../../src/storage.cpp ../../src/channels.cpp ../../src/scheduler.cpp
+SRC      := test_logic.cpp ../../src/storage.cpp ../../src/channels.cpp ../../src/scheduler.cpp ../../src/clock.cpp
 
 test_logic: $(SRC) Arduino.h EEPROM.h
 	$(CXX) $(CXXFLAGS) $(SRC) -o $@

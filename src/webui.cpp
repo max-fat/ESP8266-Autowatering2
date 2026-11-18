@@ -6,6 +6,7 @@
 
 #include "app_config.h"
 #include "channels.h"
+#include "clock.h"
 #include "scheduler.h"
 #include "storage.h"
 #include "netmgr.h"
@@ -50,6 +51,16 @@ static void send_err(int code, const char* msg) {
   send_json(code, j);
 }
 
+// Причина выключения канала -> строка для UI.
+static const char* stop_reason_str(uint8_t reason) {
+  switch (reason) {
+    case STOP_REASON_TIMER:     return "timer";
+    case STOP_REASON_MANUAL:    return "manual";
+    case STOP_REASON_LOW_WATER: return "low";
+    default:                    return "";
+  }
+}
+
 static bool pin_valid(int pin) {
   return pin >= 0 && pin <= 16 && !(pin >= 6 && pin <= 11);
 }
@@ -58,37 +69,30 @@ static bool pin_valid(int pin) {
 /*  JSON состояния                                                     */
 /* ------------------------------------------------------------------ */
 
-static void append_time_strings(String& j, time_t now, bool valid) {
-  char buf[40];
-  if (valid) {
-    struct tm tmv;
-    localtime_r(&now, &tmv);
-    strftime(buf, sizeof(buf), "%H:%M:%S", &tmv);
-    j += F("\"time\":\"");
-    j += buf;
-    strftime(buf, sizeof(buf), "%d.%m.%Y", &tmv);
-    j += F("\",\"date\":\"");
-    j += buf;
-    j += '"';
-  } else {
-    j += F("\"time\":\"--:--:--\",\"date\":\"нет времени\"");
-  }
-}
-
 static String build_state_json() {
   String j;
   j.reserve(1800);
 
-  time_t now = time(nullptr);
-  bool tv = sched_time_valid();
+  bool tv = clock_valid();
+  char timeBuf[16];
+  char dateBuf[16];
+  clock_now_strings(timeBuf, sizeof(timeBuf), dateBuf, sizeof(dateBuf));
 
   j += F("{\"fw\":\"" FW_VERSION "\",\"name\":\"" FW_NAME "\",");
+  // Время отдаём строками, посчитанными на устройстве: браузер не должен
+  // пересчитывать его в свой часовой пояс.
   j += F("\"now\":");
-  j += String((uint32_t)now);
-  j += ',';
-  append_time_strings(j, now, tv);
-  j += F(",\"timeValid\":");
+  j += String((unsigned long)clock_utc());
+  j += F(",\"time\":\"");
+  j += timeBuf;
+  j += F("\",\"date\":\"");
+  j += dateBuf;
+  j += F("\",\"timeValid\":");
   j += tv ? '1' : '0';
+  j += F(",\"timeSrc\":\"");
+  j += clock_source();
+  j += F("\",\"tz\":");
+  j += String((int)g_store.cfg.tzOffsetMin);
 
   /* Wi-Fi */
   j += F(",\"wifi\":{\"mode\":\"");
@@ -149,6 +153,14 @@ static String build_state_json() {
     j += String((unsigned long)channels_remaining_sec(i));
     j += F(",\"task\":");
     j += String((int)channels_task(i));
+    // Событие последнего выключения: seq меняется при каждом выключении,
+    // rsn - причина (timer/manual/low), run - сколько секунд реально работал.
+    j += F(",\"seq\":");
+    j += String((int)channels_stop_seq(i));
+    j += F(",\"rsn\":\"");
+    j += stop_reason_str(channels_stop_reason(i));
+    j += F("\",\"run\":");
+    j += String((unsigned)channels_last_run_sec(i));
     j += '}';
   }
   j += ']';
@@ -175,11 +187,15 @@ static String build_state_json() {
     j += String((unsigned)t.durationSec);
     j += F(",\"pd\":");
     j += String((int)t.periodDays);
-    j += F(",\"last\":");
-    j += String((uint32_t)t.lastRun);
-    j += F(",\"next\":");
-    j += String((uint32_t)sched_next_run(t));
-    j += F(",\"st\":\"");
+    char lastBuf[24];
+    char nextBuf[24];
+    clock_format_full(t.lastRun, lastBuf, sizeof(lastBuf));
+    clock_format_full(sched_next_run(t), nextBuf, sizeof(nextBuf));
+    j += F(",\"lastStr\":\"");
+    j += lastBuf;
+    j += F("\",\"nextStr\":\"");
+    j += nextBuf;
+    j += F("\",\"st\":\"");
     j += sched_status_str(i);
     j += F("\"}");
   }
@@ -418,6 +434,45 @@ static void handle_config_save() {
   send_ok();
 }
 
+// Установка времени с телефона (устройство без RTC: пока нет NTP, время
+// можно быстро "привезти" из браузера).
+static void handle_time_set() {
+  long nowUtc = arg_long("now", 0);
+  if (nowUtc < (long)CLOCK_TIME_VALID_MIN) {
+    send_err(400, "bad_time");
+    return;
+  }
+  clock_set_from_phone((uint32_t)nowUtc);
+
+  // Если браузер прислал свой пояс - сохраняем его в настройки.
+  if (s_server.hasArg("tz")) {
+    long tz = arg_long("tz", g_store.cfg.tzOffsetMin);
+    if (tz < -720) tz = -720;
+    if (tz > 840) tz = 840;
+    g_store.cfg.tzOffsetMin = (int16_t)tz;
+    storage_save();
+  }
+
+  char timeBuf[16];
+  char dateBuf[16];
+  clock_now_strings(timeBuf, sizeof(timeBuf), dateBuf, sizeof(dateBuf));
+  char tzbuf[24];
+  char sign = g_store.cfg.tzOffsetMin < 0 ? '-' : '+';
+  int32_t absMin = g_store.cfg.tzOffsetMin < 0 ? -g_store.cfg.tzOffsetMin : g_store.cfg.tzOffsetMin;
+  snprintf(tzbuf, sizeof(tzbuf), "UTC%c%02d:%02d", sign, (int)(absMin / 60), (int)(absMin % 60));
+
+  String j = F("{\"ok\":true,\"time\":\"");
+  j += timeBuf;
+  j += F("\",\"date\":\"");
+  j += dateBuf;
+  j += F("\",\"tz\":\"");
+  j += tzbuf;
+  j += F("\",\"src\":\"");
+  j += clock_source();
+  j += F("\"}");
+  send_json(200, j);
+}
+
 static void handle_wifi_save() {
   String ssid = s_server.hasArg("ssid") ? s_server.arg("ssid") : String("");
   String pass = s_server.hasArg("pass") ? s_server.arg("pass") : String("");
@@ -439,6 +494,7 @@ static void handle_wifi_save() {
 static void handle_factory_reset() {
   send_ok();
   storage_factory_reset();
+  clock_clear_manual();
   net_request_reboot(1200);
 }
 
@@ -470,6 +526,7 @@ void webui_begin() {
   s_server.on("/api/task/del", HTTP_POST, handle_task_delete);
   s_server.on("/api/task/run", HTTP_POST, handle_task_run);
   s_server.on("/api/ch", HTTP_POST, handle_channel);
+  s_server.on("/api/time", HTTP_POST, handle_time_set);
   s_server.on("/api/wifi", HTTP_POST, handle_wifi_save);
   s_server.on("/api/factory", HTTP_POST, handle_factory_reset);
   s_server.on("/api/reboot", HTTP_POST, handle_reboot);
