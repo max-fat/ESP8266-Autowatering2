@@ -13,6 +13,8 @@
 #include <Arduino.h>
 #include <stdint.h>
 
+#include "scanlist.h"
+
 void   net_begin();
 void   net_update();
 
@@ -34,3 +36,16 @@ void net_apply_time_config();
 
 // Принудительно перезапросить время у NTP.
 void net_force_ntp_sync();
+
+/* ---- Сканирование Wi-Fi (для автовыбора SSID) ----
+ * Сканирование асинхронное: запрос не блокирует веб-сервер и не рвёт
+ * соединение, поэтому страницу можно открывать и в режиме точки доступа.
+ *   net_scan_start()          - начать сканирование (если уже идёт - ничего);
+ *   net_scan_state()          - -1 идёт, -2 данных нет, >= 0 готово (число сетей);
+ *   net_scan_results(&count)  - готовый список (только при state >= 0).
+ */
+void             net_scan_start();
+int8_t           net_scan_state();
+const ScanNet*   net_scan_results(uint8_t* count);
+
+#define NET_SCAN_MAX_RESULTS 16   // сколько сетей отдаём в интерфейс

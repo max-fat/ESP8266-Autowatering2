@@ -14,6 +14,7 @@
 #include "../../src/app_config.h"
 #include "../../src/channels.h"
 #include "../../src/clock.h"
+#include "../../src/scanlist.h"
 #include "../../src/scheduler.h"
 #include "../../src/storage.h"
 
@@ -444,6 +445,79 @@ static void test_stop_events() {
   CHECK_EQ(channels_stop_reason(2), STOP_REASON_NONE);
 }
 
+/* ---------------- сканирование Wi-Fi: список сетей ---------------- */
+static ScanNet mk(const char* ssid, int rssi, int sec) {
+  ScanNet n;
+  memset(&n, 0, sizeof(n));
+  strncpy(n.ssid, ssid, SCAN_SSID_MAX);
+  n.rssi = (int8_t)rssi;
+  n.secured = (uint8_t)sec;
+  return n;
+}
+
+static void test_scanlist() {
+  printf("[scan list]\n");
+
+  // 1. Сортировка по уровню сигнала, скрытые сети отброшены
+  ScanNet in[5];
+  in[0] = mk("Home", -70, 1);
+  in[1] = mk("", -40, 0);          // скрытая сеть
+  in[2] = mk("Neighbour", -85, 0);
+  in[3] = mk("Office", -35, 1);
+  ScanNet out[4];
+  uint8_t n = scanlist_build(in, 4, out, 4);
+  CHECK_EQ(n, 3);
+  CHECK(strcmp(out[0].ssid, "Office") == 0);   // самый сильный первым
+  CHECK(strcmp(out[1].ssid, "Home") == 0);
+  CHECK(strcmp(out[2].ssid, "Neighbour") == 0);
+
+  // 2. Дубликаты SSID склеиваются, остаётся самый сильный сигнал
+  ScanNet dup[4];
+  dup[0] = mk("Home", -80, 1);
+  dup[1] = mk("Home", -50, 0);
+  dup[2] = mk("Home", -60, 1);
+  dup[3] = mk("Guest", -90, 0);
+  n = scanlist_build(dup, 4, out, 4);
+  CHECK_EQ(n, 2);
+  CHECK(strcmp(out[0].ssid, "Home") == 0);
+  CHECK_EQ(out[0].rssi, -50);
+  CHECK_EQ(out[0].secured, 1);
+  CHECK(strcmp(out[1].ssid, "Guest") == 0);
+
+  // 3. Обрезка списка: слабые сети вытесняются, сильные остаются
+  ScanNet many[6];
+  many[0] = mk("A", -90, 0);
+  many[1] = mk("B", -30, 1);
+  many[2] = mk("C", -70, 1);
+  many[3] = mk("D", -20, 0);
+  many[4] = mk("E", -95, 0);
+  many[5] = mk("F", -50, 1);
+  n = scanlist_build(many, 6, out, 3);
+  CHECK_EQ(n, 3);
+  CHECK(strcmp(out[0].ssid, "D") == 0);
+  CHECK(strcmp(out[1].ssid, "B") == 0);
+  CHECK(strcmp(out[2].ssid, "F") == 0);
+
+  // 4. Пустой вход и нулевой размер выхода
+  CHECK_EQ(scanlist_build(NULL, 0, out, 4), 0);
+  CHECK_EQ(scanlist_build(in, 4, out, 0), 0);
+
+  // 5. Экранирование для JSON
+  char esc[128];
+  scanlist_json_escape("My \"net\" \\ 5G", esc, sizeof(esc));
+  CHECK(strcmp(esc, "My \\\"net\\\" \\\\ 5G") == 0);
+  scanlist_json_escape("a\tb", esc, sizeof(esc));
+  CHECK(strcmp(esc, "a\\tb") == 0);
+  scanlist_json_escape("", esc, sizeof(esc));
+  CHECK(strcmp(esc, "") == 0);
+  // обрезка по размеру буфера: 4 байта -> 3 символа + ноль
+  scanlist_json_escape("abcdef", esc, 4);
+  CHECK(strcmp(esc, "abc") == 0);
+  // кириллица (UTF-8) проходит без изменений
+  scanlist_json_escape("Сеть", esc, sizeof(esc));
+  CHECK(strcmp(esc, "Сеть") == 0);
+}
+
 int main() {
   setenv("TZ", "UTC", 1);
   tzset();
@@ -454,6 +528,7 @@ int main() {
   test_clock();
   test_local_schedule();
   test_stop_events();
+  test_scanlist();
 
   printf("\n%d проверок, ошибок: %d\n", g_checks, g_fails);
   return g_fails ? 1 : 0;

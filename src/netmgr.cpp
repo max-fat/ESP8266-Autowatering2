@@ -23,6 +23,10 @@ static bool     s_ntpStarted = false;
 static char     s_apSsid[32] = {0};
 static DNSServer s_dns;
 static bool     s_dnsRunning = false;
+// Результаты сканирования Wi-Fi: сырые записи + обработанный список.
+static ScanNet  s_scanRaw[NET_SCAN_MAX_RESULTS * 2];
+static ScanNet  s_scanList[NET_SCAN_MAX_RESULTS];
+static uint8_t  s_scanCount = 0;
 static uint32_t s_rebootAt = 0;
 static bool     s_rebootPending = false;
 
@@ -137,6 +141,47 @@ String net_mode_str() {
 void net_request_reboot(uint32_t delayMs) {
   s_rebootPending = true;
   s_rebootAt = millis() + delayMs;
+}
+
+void net_scan_start() {
+  // Уже идёт - второй раз не запускаем (иначе SDK вернёт ошибку).
+  if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return;
+  WiFi.scanDelete();
+  s_scanCount = 0;
+  // async = true: сканирование идёт в фоне, точка доступа и соединение живы.
+  WiFi.scanNetworks(true /*async*/, true /*show_hidden*/);
+  Serial.println("[net] сканирование Wi-Fi запущено");
+}
+
+int8_t net_scan_state() {
+  return WiFi.scanComplete();   // -1 идёт, -2 нет данных, иначе число сетей
+}
+
+static void scan_collect(uint8_t found) {
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < found && n < (uint8_t)(sizeof(s_scanRaw) / sizeof(s_scanRaw[0])); i++) {
+    String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0) continue;            // скрытая сеть: имени нет
+    ScanNet& e = s_scanRaw[n++];
+    memset(&e, 0, sizeof(e));
+    strncpy(e.ssid, ssid.c_str(), SCAN_SSID_MAX);
+    e.ssid[SCAN_SSID_MAX] = '\0';
+    e.rssi = (int8_t)WiFi.RSSI(i);
+    e.secured = (WiFi.encryptionType(i) != ENC_TYPE_NONE) ? 1 : 0;
+  }
+  s_scanCount = scanlist_build(s_scanRaw, n, s_scanList, NET_SCAN_MAX_RESULTS);
+  Serial.printf("[net] найдено сетей: %u (отдано %u)\n", (unsigned)n, (unsigned)s_scanCount);
+}
+
+const ScanNet* net_scan_results(uint8_t* count) {
+  int8_t found = WiFi.scanComplete();
+  if (found < 0) {
+    if (count) *count = 0;
+    return NULL;
+  }
+  scan_collect((uint8_t)found);
+  if (count) *count = s_scanCount;
+  return s_scanList;
 }
 
 void net_update() {

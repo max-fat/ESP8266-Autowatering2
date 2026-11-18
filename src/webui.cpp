@@ -473,6 +473,60 @@ static void handle_time_set() {
   send_json(200, j);
 }
 
+/* Сканирование Wi-Fi для автовыбора SSID.
+ *   GET /api/scan        - состояние: running | done | idle и список сетей;
+ *   GET /api/scan?start=1 - запустить новое сканирование и сразу ответить.
+ * Сканирование асинхронное, поэтому страница опрашивает /api/scan, пока не
+ * получит done (обычно 2-5 секунд).
+ */
+static void handle_scan() {
+  int8_t st = net_scan_state();
+
+  if (s_server.hasArg("start") && s_server.arg("start") != "0") {
+    if (st != WIFI_SCAN_RUNNING) {
+      net_scan_start();
+      st = net_scan_state();
+    }
+  }
+
+  String j;
+  j.reserve(1400);
+  j += F("{\"ok\":true,\"state\":\"");
+
+  const ScanNet* nets = NULL;
+  uint8_t count = 0;
+
+  if (st == WIFI_SCAN_RUNNING) {
+    j += F("running");
+  } else if (st == WIFI_SCAN_FAILED) {
+    j += F("failed");               // SDK не смог запустить сканирование
+  } else if (st < 0) {
+    j += F("idle");                 // ещё не сканировали
+  } else {
+    j += F("done");
+    nets = net_scan_results(&count);
+  }
+
+  j += F("\",\"count\":");
+  j += String((int)count);
+  j += F(",\"nets\":[");
+
+  char esc[SCAN_SSID_MAX * 6 + 1];
+  for (uint8_t i = 0; i < count; i++) {
+    if (i) j += ',';
+    scanlist_json_escape(nets[i].ssid, esc, sizeof(esc));
+    j += F("{\"ssid\":\"");
+    j += esc;
+    j += F("\",\"rssi\":");
+    j += String((int)nets[i].rssi);
+    j += F(",\"enc\":");
+    j += nets[i].secured ? '1' : '0';
+    j += '}';
+  }
+  j += F("]}");
+  send_json(200, j);
+}
+
 static void handle_wifi_save() {
   String ssid = s_server.hasArg("ssid") ? s_server.arg("ssid") : String("");
   String pass = s_server.hasArg("pass") ? s_server.arg("pass") : String("");
@@ -527,6 +581,7 @@ void webui_begin() {
   s_server.on("/api/task/run", HTTP_POST, handle_task_run);
   s_server.on("/api/ch", HTTP_POST, handle_channel);
   s_server.on("/api/time", HTTP_POST, handle_time_set);
+  s_server.on("/api/scan", HTTP_GET, handle_scan);
   s_server.on("/api/wifi", HTTP_POST, handle_wifi_save);
   s_server.on("/api/factory", HTTP_POST, handle_factory_reset);
   s_server.on("/api/reboot", HTTP_POST, handle_reboot);

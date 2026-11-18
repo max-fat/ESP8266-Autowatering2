@@ -88,6 +88,25 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .banner{display:none;margin-bottom:14px;padding:12px;border-radius:12px;font-size:13px;
   background:#2a2110;border:1px solid #664c14;color:#ffe0a8}
 .banner.show{display:block}
+.inrow{display:flex;gap:8px;margin-top:5px}
+.inrow input{
+  flex:1;min-width:0;padding:10px;border-radius:10px;border:1px solid var(--line);
+  background:#0d1728;color:var(--txt);font-size:14px;outline:none
+}
+.inrow input:focus{border-color:var(--blue)}
+.inrow button{white-space:nowrap;flex:0 0 auto}
+.scanlist{display:none;margin-top:10px;max-height:240px;overflow:auto;border:1px solid var(--line);
+  border-radius:10px;background:#0d1728}
+.scanlist.show{display:block}
+.scanlist .empty{padding:10px;color:var(--muted);font-size:12.5px}
+.scanrow{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:10px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;
+  color:var(--txt);font-size:13.5px;font-weight:600}
+.scanrow:last-child{border-bottom:0}
+.scanrow:hover{background:#132238}
+.scanrow .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scanrow .rs{color:var(--muted);font-size:12px;white-space:nowrap;font-weight:500}
+.scanrow.sel{background:#14304d}
 .toast{
   position:fixed;left:50%;bottom:18px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
   background:#12243a;border:1px solid var(--line);color:var(--txt);padding:10px 16px;border-radius:999px;
@@ -167,14 +186,22 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <div class="card">
       <h2>Wi-Fi</h2>
       <div class="grid">
-        <label>Имя сети (SSID)<input id="s_ssid" maxlength="32" placeholder="Моя сеть 2.4 ГГц"></label>
+        <div>
+          <label for="s_ssid">Имя сети (SSID)</label>
+          <div class="inrow">
+            <input id="s_ssid" maxlength="32" placeholder="Моя сеть 2.4 ГГц">
+            <button type="button" class="blue" id="btnScan" title="Найти сети вокруг">Сканировать</button>
+          </div>
+        </div>
         <label>Пароль<input id="s_pass" type="password" maxlength="64" placeholder="оставьте пустым, чтобы не менять"></label>
       </div>
+      <div class="scanlist" id="scanList"></div>
       <div class="actions">
         <button class="primary" id="btnWifi">Сохранить Wi-Fi и перезагрузить</button>
       </div>
-      <p class="hint">ESP8266 работает только в сетях 2.4 ГГц. После сохранения устройство перезагрузится и
-        подключится к указанной сети; IP-адрес будет показан в шапке.</p>
+      <p class="hint">ESP8266 работает только в сетях 2.4 ГГц. Нажмите «Сканировать» — контроллер найдёт
+        сети вокруг, и имя можно будет выбрать из списка (пароль всё равно вводится вручную). После
+        сохранения устройство перезагрузится и подключится к указанной сети; IP-адрес будет показан в шапке.</p>
     </div>
 
     <div class="card">
@@ -335,6 +362,96 @@ async function sendPhoneTime(withTz){
   }
 }
 
+/* ---------- сканирование Wi-Fi ---------- */
+let scanTimer = null;
+
+function escHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function scanBusy(on){
+  const b = $('btnScan');
+  if(b){ b.disabled = !!on; b.textContent = on ? 'Сканирую…' : 'Сканировать'; }
+}
+
+/* Из баннера режима настройки: открыть настройки и сразу начать поиск сетей. */
+function openScan(){
+  selectTab('settings');
+  startScan();
+}
+
+async function startScan(){
+  if(scanTimer) return;                      // уже идёт
+  const box = $('scanList');
+  if(!box) return;
+  box.className = 'scanlist show';
+  box.innerHTML = '<div class="empty">Сканирую эфир… это занимает до 10 секунд</div>';
+  scanBusy(true);
+  try{
+    await getJson('/api/scan?start=1');
+  }catch(e){
+    box.innerHTML = '<div class="empty">Не удалось запустить сканирование</div>';
+    scanBusy(false);
+    return;
+  }
+  let tries = 0;
+  const tick = async () => {
+    scanTimer = null;
+    tries++;
+    let r = null;
+    try{ r = await getJson('/api/scan'); }catch(e){}
+    if(r && r.state === 'done'){
+      renderScan(r.nets || []);
+      scanBusy(false);
+      return;
+    }
+    if(r && (r.state === 'failed' || r.state === 'idle')){
+      $('scanList').innerHTML = '<div class="empty">Не удалось выполнить сканирование. ' +
+        'Нажмите «Сканировать» ещё раз.</div>';
+      scanBusy(false);
+      return;
+    }
+    if(tries >= 20){
+      $('scanList').innerHTML = '<div class="empty">Сети не найдены. Нажмите «Сканировать» ещё раз.</div>';
+      scanBusy(false);
+      return;
+    }
+    scanTimer = setTimeout(tick, 700);
+  };
+  scanTimer = setTimeout(tick, 700);
+}
+
+function renderScan(nets){
+  const box = $('scanList');
+  if(!box) return;
+  box.className = 'scanlist show';
+  if(!nets.length){
+    box.innerHTML = '<div class="empty">Сетей не найдено. Проверьте, что роутер включён и вещает на 2.4 ГГц.</div>';
+    return;
+  }
+  const cur = ($('s_ssid').value || '').trim();
+  box.innerHTML = nets.map(n=>{
+    const sec = n.enc ? 1 : 0;
+    return '<button type="button" class="scanrow' + (n.ssid === cur ? ' sel' : '') + '" data-ssid="' +
+      escHtml(n.ssid) + '" data-sec="' + sec + '">' +
+      '<span class="nm">' + escHtml(n.ssid) + '</span>' +
+      '<span class="rs">' + (sec ? '🔒 ' : '') + n.rssi + ' дБм</span></button>';
+  }).join('');
+  box.querySelectorAll('button.scanrow').forEach(b=>{
+    b.addEventListener('click', ()=> pickSsid(b.dataset.ssid, b.dataset.sec === '1'));
+  });
+}
+
+function pickSsid(ssid, secured){
+  if(scanTimer){ clearTimeout(scanTimer); scanTimer = null; }
+  $('s_ssid').value = ssid;
+  const box = $('scanList');
+  if(box){ box.className = 'scanlist'; box.innerHTML = ''; }
+  scanBusy(false);
+  if(secured && !$('s_pass').value) $('s_pass').focus();
+  toast('Сеть выбрана: ' + ssid);
+}
+
 /* ---------- вкладки ---------- */
 document.querySelectorAll('nav.tabs button').forEach(b=>{
   b.addEventListener('click', ()=> selectTab(b.dataset.tab));
@@ -368,11 +485,12 @@ function renderHeader(){
 
   const b = $('banner');
   const timeBtn = '<button class="small blue" onclick="sendPhoneTime(true)">Взять время с телефона</button>';
+  const scanBtn = '<button class="small blue" onclick="openScan()">Найти сети</button>';
   if(!st.wifi.configured){
     b.className = 'banner show';
     b.innerHTML = '<b>Wi-Fi не настроен.</b> Подключитесь к открытой сети <b>' + st.wifi.apSsid +
-      '</b> и укажите данные вашей сети во вкладке «Настройки». Пока нет интернета, время можно ' +
-      'передать с телефона: ' + timeBtn;
+      '</b> и укажите данные вашей сети во вкладке «Настройки»: ' + scanBtn +
+      ' — имя сети подставится в поле SSID. Пока нет интернета, время можно передать с телефона: ' + timeBtn;
   } else if(!st.timeValid){
     b.className = 'banner show';
     b.innerHTML = '<b>Нет синхронизации времени.</b> Расписание полива недоступно, пока время не ' +
@@ -609,6 +727,8 @@ $('btnCfg').addEventListener('click', async ()=>{
     await load();
   }catch(e){ toast(errText(e), true); }
 });
+
+$('btnScan').addEventListener('click', startScan);
 
 $('btnPhoneTime').addEventListener('click', ()=> sendPhoneTime(false));
 $('btnPhoneTimeTz').addEventListener('click', ()=> sendPhoneTime(true));
