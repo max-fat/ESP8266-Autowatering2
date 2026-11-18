@@ -23,6 +23,10 @@ static bool     s_ntpStarted = false;
 static char     s_apSsid[32] = {0};
 static DNSServer s_dns;
 static bool     s_dnsRunning = false;
+// Результаты сканирования Wi-Fi: сырые записи + обработанный список.
+static ScanNet  s_scanRaw[NET_SCAN_MAX_RESULTS * 2];
+static ScanNet  s_scanList[NET_SCAN_MAX_RESULTS];
+static uint8_t  s_scanCount = 0;
 static uint32_t s_rebootAt = 0;
 static bool     s_rebootPending = false;
 
@@ -38,18 +42,21 @@ static void build_ap_ssid() {
 }
 
 static void start_ntp() {
-  long tz = (long)g_store.cfg.tzOffsetMin * 60L;
+  // Пояс НЕ передаём ядру: внутри прошивки время всегда UTC, а смещение
+  // применяется в src/clock.cpp. Так поведение одинаково на ядрах 2.4.x и 3.x.
   const char* srv = g_store.cfg.ntpServer[0] ? g_store.cfg.ntpServer : DEFAULT_NTP_SERVER;
-  configTime(tz, 0, srv);
+  configTime(0, 0, srv);
   s_lastNtp = millis();
   s_ntpStarted = true;
-  Serial.printf("[net] NTP: %s, TZ offset %ld min\n", srv, (long)g_store.cfg.tzOffsetMin);
+  Serial.printf("[net] NTP: %s (UTC), пояс %d мин\n", srv, (int)g_store.cfg.tzOffsetMin);
 }
 
 void net_apply_time_config() {
-  if (net_connected()) {
-    s_ntpStarted = false;   // пересинхронизировать при следующем тике
-  }
+  s_ntpStarted = false;   // пересинхронизировать при следующем тике net_update()
+}
+
+void net_force_ntp_sync() {
+  s_ntpStarted = false;
 }
 
 static void start_ap() {
@@ -134,6 +141,47 @@ String net_mode_str() {
 void net_request_reboot(uint32_t delayMs) {
   s_rebootPending = true;
   s_rebootAt = millis() + delayMs;
+}
+
+void net_scan_start() {
+  // Уже идёт - второй раз не запускаем (иначе SDK вернёт ошибку).
+  if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return;
+  WiFi.scanDelete();
+  s_scanCount = 0;
+  // async = true: сканирование идёт в фоне, точка доступа и соединение живы.
+  WiFi.scanNetworks(true /*async*/, true /*show_hidden*/);
+  Serial.println("[net] сканирование Wi-Fi запущено");
+}
+
+int8_t net_scan_state() {
+  return WiFi.scanComplete();   // -1 идёт, -2 нет данных, иначе число сетей
+}
+
+static void scan_collect(uint8_t found) {
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < found && n < (uint8_t)(sizeof(s_scanRaw) / sizeof(s_scanRaw[0])); i++) {
+    String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0) continue;            // скрытая сеть: имени нет
+    ScanNet& e = s_scanRaw[n++];
+    memset(&e, 0, sizeof(e));
+    strncpy(e.ssid, ssid.c_str(), SCAN_SSID_MAX);
+    e.ssid[SCAN_SSID_MAX] = '\0';
+    e.rssi = (int8_t)WiFi.RSSI(i);
+    e.secured = (WiFi.encryptionType(i) != ENC_TYPE_NONE) ? 1 : 0;
+  }
+  s_scanCount = scanlist_build(s_scanRaw, n, s_scanList, NET_SCAN_MAX_RESULTS);
+  Serial.printf("[net] найдено сетей: %u (отдано %u)\n", (unsigned)n, (unsigned)s_scanCount);
+}
+
+const ScanNet* net_scan_results(uint8_t* count) {
+  int8_t found = WiFi.scanComplete();
+  if (found < 0) {
+    if (count) *count = 0;
+    return NULL;
+  }
+  scan_collect((uint8_t)found);
+  if (count) *count = s_scanCount;
+  return s_scanList;
 }
 
 void net_update() {

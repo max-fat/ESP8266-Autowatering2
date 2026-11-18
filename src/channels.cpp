@@ -9,6 +9,11 @@ struct ChannelRuntime {
   uint32_t startedMs;
   uint32_t durationMs;
   int8_t   taskId;
+  // Событие последнего выключения - по нему UI показывает уведомление
+  // ("полив завершён", "остановлен вручную", "низкий уровень воды").
+  uint8_t  stopSeq;
+  uint8_t  stopReason;
+  uint16_t lastRunSec;
 };
 
 static ChannelRuntime s_ch[NUM_CHANNELS];
@@ -30,6 +35,18 @@ static uint8_t on_level(uint8_t ch) {
 
 static void write_channel(uint8_t ch, bool on) {
   digitalWrite(g_store.cfg.ch[ch].pin, on ? on_level(ch) : off_level(ch));
+}
+
+static void stop_internal(uint8_t ch, uint8_t reason) {
+  if (!valid_ch(ch) || !s_ch[ch].on) return;
+  s_ch[ch].on = false;
+  s_ch[ch].taskId = -1;
+  s_ch[ch].stopSeq++;
+  s_ch[ch].stopReason = reason;
+  uint32_t elapsedSec = (millis() - s_ch[ch].startedMs) / 1000UL;
+  if (elapsedSec > 0xFFFF) elapsedSec = 0xFFFF;
+  s_ch[ch].lastRunSec = (uint16_t)elapsedSec;
+  write_channel(ch, false);
 }
 
 static void setup_channel_pin(uint8_t ch) {
@@ -56,6 +73,9 @@ void channels_begin() {
     s_ch[i].startedMs = 0;
     s_ch[i].durationMs = 0;
     s_ch[i].taskId = -1;
+    s_ch[i].stopSeq = 0;
+    s_ch[i].stopReason = STOP_REASON_NONE;
+    s_ch[i].lastRunSec = 0;
     setup_channel_pin(i);
   }
   setup_sensor_pin();
@@ -126,16 +146,23 @@ StartResult channels_start(uint8_t ch, uint16_t sec, int8_t taskId) {
 }
 
 void channels_stop(uint8_t ch) {
-  if (!valid_ch(ch)) return;
-  if (s_ch[ch].on) {
-    s_ch[ch].on = false;
-    s_ch[ch].taskId = -1;
-    write_channel(ch, false);
-  }
+  stop_internal(ch, STOP_REASON_MANUAL);
 }
 
 void channels_stop_all() {
   for (uint8_t i = 0; i < NUM_CHANNELS; i++) channels_stop(i);
+}
+
+uint8_t channels_stop_seq(uint8_t ch) {
+  return valid_ch(ch) ? s_ch[ch].stopSeq : (uint8_t)0;
+}
+
+uint8_t channels_stop_reason(uint8_t ch) {
+  return valid_ch(ch) ? s_ch[ch].stopReason : (uint8_t)STOP_REASON_NONE;
+}
+
+uint16_t channels_last_run_sec(uint8_t ch) {
+  return valid_ch(ch) ? s_ch[ch].lastRunSec : 0;
 }
 
 void channels_update() {
@@ -157,7 +184,7 @@ void channels_update() {
   // 2. Аварийное отключение при низком уровне воды.
   if (g_store.cfg.blockWhenLow && sensor_is_low()) {
     for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
-      if (s_ch[i].on) channels_stop(i);
+      stop_internal(i, STOP_REASON_LOW_WATER);
     }
   }
 
@@ -165,7 +192,7 @@ void channels_update() {
   for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
     if (!s_ch[i].on) continue;
     if ((uint32_t)(now - s_ch[i].startedMs) >= s_ch[i].durationMs) {
-      channels_stop(i);
+      stop_internal(i, STOP_REASON_TIMER);
     }
   }
 }

@@ -17,8 +17,9 @@ bool sched_time_valid();
 // Обработка всех задач. Вызывать из loop().
 void sched_update();
 
-// Ближайшее плановое время задачи (0 - задача выключена или время неизвестно).
-time_t sched_next_run(const TaskCfg& t);
+// Ближайшее плановое время задачи в локальной шкале
+// (0 - задача выключена или время неизвестно).
+uint32_t sched_next_run(const TaskCfg& t);
 
 // Сброс расписания задачи (после изменения её параметров из UI).
 void sched_task_changed(uint8_t idx);

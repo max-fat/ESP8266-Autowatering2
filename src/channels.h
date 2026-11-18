@@ -6,6 +6,14 @@
 #include <stdint.h>
 #include "app_config.h"
 
+// Причины выключения канала (для уведомлений в UI).
+enum StopReason {
+  STOP_REASON_NONE = 0,
+  STOP_REASON_TIMER = 1,      // истекло заданное время полива
+  STOP_REASON_MANUAL = 2,     // остановлено вручную (кнопка/API)
+  STOP_REASON_LOW_WATER = 3   // аварийное отключение: низкий уровень воды
+};
+
 enum StartResult {
   START_OK = 0,
   START_LOW_WATER = 1,     // датчик сообщает о низком уровне воды
@@ -29,6 +37,13 @@ StartResult channels_start(uint8_t ch, uint16_t sec, int8_t taskId);
 
 void channels_stop(uint8_t ch);
 void channels_stop_all();
+
+// Событие последнего выключения канала: seq увеличивается при каждом
+// выключении (UI сравнивает значения и показывает уведомление),
+// reason - одно из StopReason, lastRunSec - сколько канал реально работал.
+uint8_t  channels_stop_seq(uint8_t ch);
+uint8_t  channels_stop_reason(uint8_t ch);
+uint16_t channels_last_run_sec(uint8_t ch);
 
 bool     channels_is_on(uint8_t ch);
 uint32_t channels_remaining_sec(uint8_t ch);  // 0, если выключен

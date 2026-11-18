@@ -13,6 +13,8 @@
 
 #include "../../src/app_config.h"
 #include "../../src/channels.h"
+#include "../../src/clock.h"
+#include "../../src/scanlist.h"
 #include "../../src/scheduler.h"
 #include "../../src/storage.h"
 
@@ -101,6 +103,8 @@ static void test_storage() {
   CHECK_EQ(g_store.cfg.ch[0].pin, DEFAULT_PUMP_PIN_0);
   CHECK_EQ(g_store.cfg.ch[3].pin, DEFAULT_PUMP_PIN_3);
   CHECK_EQ(g_store.cfg.maxRunSec, DEFAULT_MAX_RUN_SEC);
+  CHECK_EQ(g_store.cfg.tzOffsetMin, DEFAULT_TZ_OFFSET_MIN);  // UTC+3 (МСК)
+  CHECK_EQ(g_store.version, STORE_VERSION);
   CHECK(strcmp(g_store.cfg.ntpServer, DEFAULT_NTP_SERVER) == 0);
 
   // сохранение и повторная загрузка
@@ -138,6 +142,7 @@ static void test_channels() {
   printf("[channels]\n");
   reset_all();
   storage_begin();
+  g_store.cfg.tzOffsetMin = 0;   // тесты не зависят от пояса
 
   // по умолчанию активный ВЫСОКИЙ уровень: в выключенном состоянии - LOW
   channels_begin();
@@ -221,6 +226,7 @@ static void test_scheduler() {
   printf("[scheduler]\n");
   reset_all();
   storage_begin();
+  g_store.cfg.tzOffsetMin = 0;
   channels_begin();
 
   g_store.cfg.catchupHours = 6;
@@ -316,6 +322,202 @@ static void test_scheduler() {
   printf("  (пример: задача 0 nextDue=%s)\n", fmt((time_t)g_store.tasks[0].nextDue));
 }
 
+// --------------------------------------------------------------------- clock
+static void test_clock() {
+  printf("[clock]\n");
+  reset_all();
+  storage_begin();
+
+  g_now = 0;  // NTP ещё не синхронизирован
+  CHECK_EQ(clock_valid(), 0);
+  CHECK(strcmp(clock_source(), "none") == 0);
+
+  uint32_t utc = (uint32_t)make_time(2026, 11, 18, 9, 30);
+  clock_set_from_phone(utc);
+  CHECK_EQ(clock_valid(), 1);
+  CHECK(strcmp(clock_source(), "manual") == 0);
+  CHECK_EQ(clock_utc(), utc);
+  CHECK_EQ(clock_local(), utc + 3 * 3600);  // пояс по умолчанию UTC+3
+
+  // ручное время "идёт" от millis()
+  g_millis += 65000;
+  CHECK_EQ(clock_utc(), utc + 65);
+
+  char buf[24];
+  clock_format_full(clock_local(), buf, sizeof(buf));
+  CHECK(strcmp(buf, "18.11.2026 12:31") == 0);
+
+  // как только появился NTP - он приоритетнее
+  g_now = make_time(2026, 11, 18, 10, 0);
+  CHECK(strcmp(clock_source(), "ntp") == 0);
+  CHECK_EQ(clock_utc(), (long)g_now);
+
+  // смена пояса меняет локальную шкалу
+  g_store.cfg.tzOffsetMin = 0;
+  CHECK_EQ(clock_local(), (long)g_now);
+  g_store.cfg.tzOffsetMin = 180;
+
+  // часовой пояс/время форматируются в формате UTC±HH:MM на стороне UI (JS),
+  // здесь проверяем только арифметику суток
+  uint32_t local = clock_local();
+  CHECK_EQ(clock_at_time(local, 1, 8, 0), clock_day_start(local) + 86400 + 8 * 3600);
+}
+
+// ------------------------------------------ расписание в местном времени
+static void test_local_schedule() {
+  printf("[local schedule]\n");
+  reset_all();
+  storage_begin();
+  g_store.cfg.tzOffsetMin = 180;   // UTC+3
+  channels_begin();
+
+  // 09:00 по Москве (06:00 UTC), задача на 08:00 -> следующий пуск завтра в 08:00
+  g_now = make_time(2026, 11, 18, 6, 0);
+  add_task(0, 0, 8, 0, 30, 1);
+  sched_update();
+
+  char buf[24];
+  clock_format_full(g_store.tasks[0].nextDue, buf, sizeof(buf));
+  CHECK(strcmp(buf, "19.11.2026 08:00") == 0);   // не 11:00 - баг был в поясах
+
+  // наступает 08:00 по Москве (05:00 UTC) - полив
+  g_now = make_time(2026, 11, 19, 5, 0);
+  sched_update();
+  CHECK_EQ(channels_is_on(0), 1);
+  clock_format_full(g_store.tasks[0].lastRun, buf, sizeof(buf));
+  CHECK(strcmp(buf, "19.11.2026 08:00") == 0);
+
+  // и следующий пуск через сутки в то же местное время
+  clock_format_full(g_store.tasks[0].nextDue, buf, sizeof(buf));
+  CHECK(strcmp(buf, "20.11.2026 08:00") == 0);
+  channels_stop(0);
+
+  // без времени (ни NTP, ни телефона) задачи не запускаются
+  g_now = 0;
+  clock_clear_manual();
+  CHECK_EQ(sched_time_valid(), 0);
+  sched_update();               // не должно ничего запустить/сломать
+  CHECK_EQ(channels_is_on(0), 0);
+}
+
+// ------------------------------------------------ события выключения каналов
+static void test_stop_events() {
+  printf("[stop events]\n");
+  reset_all();
+  storage_begin();
+  g_store.cfg.tzOffsetMin = 0;
+  channels_begin();
+
+  CHECK_EQ(channels_stop_seq(0), 0);
+  CHECK_EQ(channels_stop_reason(0), STOP_REASON_NONE);
+
+  // 1. истекло заданное время полива -> reason=timer
+  CHECK_EQ(channels_start(0, 10, -1), START_OK);
+  g_millis += 10000;
+  channels_update();
+  CHECK_EQ(channels_is_on(0), 0);
+  CHECK_EQ(channels_stop_seq(0), 1);
+  CHECK_EQ(channels_stop_reason(0), STOP_REASON_TIMER);
+  CHECK_EQ(channels_last_run_sec(0), 10);
+
+  // 2. ручная остановка -> reason=manual + фактическая длительность
+  CHECK_EQ(channels_start(0, 60, -1), START_OK);
+  g_millis += 4000;
+  channels_stop(0);
+  CHECK_EQ(channels_stop_seq(0), 2);
+  CHECK_EQ(channels_stop_reason(0), STOP_REASON_MANUAL);
+  CHECK_EQ(channels_last_run_sec(0), 4);
+
+  // 3. повторный стоп уже выключенного канала событие не создаёт
+  channels_stop(0);
+  CHECK_EQ(channels_stop_seq(0), 2);
+
+  // 4. аварийный стоп по низкому уровню воды -> reason=low
+  CHECK_EQ(channels_start(1, 60, -1), START_OK);
+  g_pins[g_store.cfg.sensorPin] = LOW;
+  for (int i = 0; i < 10; i++) { g_millis += 30; channels_update(); }
+  CHECK_EQ(channels_is_on(1), 0);
+  CHECK_EQ(channels_stop_seq(1), 1);
+  CHECK_EQ(channels_stop_reason(1), STOP_REASON_LOW_WATER);
+
+  // 5. счётчики каналов независимы
+  CHECK_EQ(channels_stop_seq(2), 0);
+  CHECK_EQ(channels_stop_reason(2), STOP_REASON_NONE);
+}
+
+/* ---------------- сканирование Wi-Fi: список сетей ---------------- */
+static ScanNet mk(const char* ssid, int rssi, int sec) {
+  ScanNet n;
+  memset(&n, 0, sizeof(n));
+  strncpy(n.ssid, ssid, SCAN_SSID_MAX);
+  n.rssi = (int8_t)rssi;
+  n.secured = (uint8_t)sec;
+  return n;
+}
+
+static void test_scanlist() {
+  printf("[scan list]\n");
+
+  // 1. Сортировка по уровню сигнала, скрытые сети отброшены
+  ScanNet in[5];
+  in[0] = mk("Home", -70, 1);
+  in[1] = mk("", -40, 0);          // скрытая сеть
+  in[2] = mk("Neighbour", -85, 0);
+  in[3] = mk("Office", -35, 1);
+  ScanNet out[4];
+  uint8_t n = scanlist_build(in, 4, out, 4);
+  CHECK_EQ(n, 3);
+  CHECK(strcmp(out[0].ssid, "Office") == 0);   // самый сильный первым
+  CHECK(strcmp(out[1].ssid, "Home") == 0);
+  CHECK(strcmp(out[2].ssid, "Neighbour") == 0);
+
+  // 2. Дубликаты SSID склеиваются, остаётся самый сильный сигнал
+  ScanNet dup[4];
+  dup[0] = mk("Home", -80, 1);
+  dup[1] = mk("Home", -50, 0);
+  dup[2] = mk("Home", -60, 1);
+  dup[3] = mk("Guest", -90, 0);
+  n = scanlist_build(dup, 4, out, 4);
+  CHECK_EQ(n, 2);
+  CHECK(strcmp(out[0].ssid, "Home") == 0);
+  CHECK_EQ(out[0].rssi, -50);
+  CHECK_EQ(out[0].secured, 1);
+  CHECK(strcmp(out[1].ssid, "Guest") == 0);
+
+  // 3. Обрезка списка: слабые сети вытесняются, сильные остаются
+  ScanNet many[6];
+  many[0] = mk("A", -90, 0);
+  many[1] = mk("B", -30, 1);
+  many[2] = mk("C", -70, 1);
+  many[3] = mk("D", -20, 0);
+  many[4] = mk("E", -95, 0);
+  many[5] = mk("F", -50, 1);
+  n = scanlist_build(many, 6, out, 3);
+  CHECK_EQ(n, 3);
+  CHECK(strcmp(out[0].ssid, "D") == 0);
+  CHECK(strcmp(out[1].ssid, "B") == 0);
+  CHECK(strcmp(out[2].ssid, "F") == 0);
+
+  // 4. Пустой вход и нулевой размер выхода
+  CHECK_EQ(scanlist_build(NULL, 0, out, 4), 0);
+  CHECK_EQ(scanlist_build(in, 4, out, 0), 0);
+
+  // 5. Экранирование для JSON
+  char esc[128];
+  scanlist_json_escape("My \"net\" \\ 5G", esc, sizeof(esc));
+  CHECK(strcmp(esc, "My \\\"net\\\" \\\\ 5G") == 0);
+  scanlist_json_escape("a\tb", esc, sizeof(esc));
+  CHECK(strcmp(esc, "a\\tb") == 0);
+  scanlist_json_escape("", esc, sizeof(esc));
+  CHECK(strcmp(esc, "") == 0);
+  // обрезка по размеру буфера: 4 байта -> 3 символа + ноль
+  scanlist_json_escape("abcdef", esc, 4);
+  CHECK(strcmp(esc, "abc") == 0);
+  // кириллица (UTF-8) проходит без изменений
+  scanlist_json_escape("Сеть", esc, sizeof(esc));
+  CHECK(strcmp(esc, "Сеть") == 0);
+}
+
 int main() {
   setenv("TZ", "UTC", 1);
   tzset();
@@ -323,6 +525,10 @@ int main() {
   test_storage();
   test_channels();
   test_scheduler();
+  test_clock();
+  test_local_schedule();
+  test_stop_events();
+  test_scanlist();
 
   printf("\n%d проверок, ошибок: %d\n", g_checks, g_fails);
   return g_fails ? 1 : 0;

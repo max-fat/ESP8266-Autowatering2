@@ -60,7 +60,9 @@
 | `src/storage.h/.cpp` | EEPROM: `storage_begin/save/factory_reset/defaults`, CRC32, глобальный `Store g_store` |
 | `src/channels.h/.cpp` | Драйвер помп и датчика: уровни/инверсия, таймеры `millis()`, антидребезг датчика, аварийное отключение, `channels_start()`/`channels_stop()` |
 | `src/scheduler.h/.cpp` | Расписание: `next_occurrence`, `at_day_time` (локальное время), `nextDue`/`lastRun`, окно «догоняющего» полива, статусы |
-| `src/netmgr.h/.cpp` | Состояния Wi-Fi (`BOOT/STA/AP/AP_STA`), captive portal (DNSServer), NTP (`configTime`), отложенная перезагрузка |
+| `src/clock.h/.cpp` | Время: NTP/телефон, UTC + смещение пояса, «локальные секунды эпохи», форматирование строк для UI, арифметика суток |
+| `src/netmgr.h/.cpp` | Состояния Wi-Fi (`BOOT/STA/AP/AP_STA`), captive portal (DNSServer), NTP (`configTime(0,0,...)` — всегда UTC), отложенная перезагрузка, асинхронное сканирование сетей (`net_scan_start/net_scan_state/net_scan_results`) |
+| `src/scanlist.h/.cpp` | Чистая логика списка сетей: отбросить скрытые, склеить дубликаты SSID, отсортировать по сигналу, обрезать до лимита, JSON-экранирование. Покрыта host-тестами |
 | `src/webui.h/.cpp` | HTTP-сервер, REST API, сборка JSON вручную, отдача gzip-страницы |
 | `src/page_html.h` | **Генерируется** из `web/index.html` — не редактировать руками |
 | `web/index.html` | Интерфейс: 3 вкладки, опрос `/api/state` каждые 2 с |
@@ -80,7 +82,7 @@
 (`EEPROM.begin(1024)`), защищена `magic`/`version`/`crc32`.
 Раскладка: `magic`, `version`, `Settings cfg`, `TaskCfg tasks[8]`, `crc`.
 
-* `Settings`: `ssid`, `pass`, `ntpServer`, `tzOffsetMin`, `sensorPin`,
+* `Settings`: `ssid`, `pass`, `ntpServer`, `tzOffsetMin` (минуты, 180 = МСК), `sensorPin`,
   `sensorActiveLow`, `sensorPullup`, `blockWhenLow`, `catchupHours`, `maxRunSec`,
   `ch[4]` (`pin`, `activeLow`).
 * `TaskCfg`: `used`, `enabled`, `channel`, `hour`, `minute`, `periodDays`,
@@ -104,30 +106,47 @@
 
 ## 5. Логика времени (важно!)
 
-* Время берётся по NTP: `configTime(tzOffsetMin*60, 0, ntpServer)`
-  (в ядре 2.4.2 смещение учитывается с точностью до часа, в 3.x — точнее).
-* `sched_time_valid()` = `time(nullptr) > 1700000000` (грубая проверка, что синк был).
-* В ядре 2.4.2 `time()` уже содержит локальное смещение; `localtime_r()` даёт
-  локальные компоненты, `mktime()` — обратное преобразование. В ядре 3.x
-  `time()` — UTC, а `localtime_r()` применяет смещение. **Оба варианта дают
-  одинаковые локальные компоненты**, поэтому код использует только связку
-  `localtime_r`/`mktime` и не складывает смещение вручную. Не «улучшайте» это
-  добавлением `tzOffsetMin` к `time()` — сломается на одном из ядер.
-* Расписание: `nextDue` — «якорь». Если `now >= nextDue`:
-  * `now - nextDue <= catchupHours*3600` → поливаем, `lastRun = now`;
-  * иначе — пропускаем и переносим `nextDue` на следующий период.
-  `nextDue` всегда вычисляется как `at_day_time(previous, periodDays, hour, minute)`
-  (mktime нормализует даты, включая переходы месяца/года и DST — время суток
-  сохраняется).
-
----
+* Внутри прошивки время всегда считается через `src/clock.*`:
+  * `clock_utc()` — UTC-секунды. Источник №1 — NTP (`configTime(0, 0, server)`,
+    ядро отдаёт UTC), источник №2 — время с телефона (`clock_set_from_phone()`),
+    которое «идёт» от `millis()` и живёт до перезагрузки; иначе время неизвестно.
+  * `clock_local()` = UTC + `tzOffsetMin*60`. Это «локальные секунды эпохи»
+    (wall clock). Пояс **не передаётся ядру** — иначе в 2.4.2 и 3.x получается
+    разное поведение `time()`/`localtime()`.
+* Всё расписание и хранение (`lastRun`, `nextDue`) — в локальной шкале.
+  Арифметика суток — целочисленная: `day = local/86400`,
+  `clock_at_time(local, days, h, m) = (day+days)*86400 + h*3600 + m*60`.
+  Никаких `mktime`/`localtime` (нет DST-сюрпризов, работает одинаково на всех ядрах).
+* Смена пояса не сдвигает расписание: задача «08:00» остаётся на 08:00 местного.
+* UI **не должен** форматировать время сам: сервер отдаёт готовые строки
+  (`time`, `date`, `lastStr`, `nextStr`) и `timeSrc` (`ntp`/`manual`/`none`).
+  Именно из-за форматирования `new Date(epoch)` в браузере раньше появлялся
+  сдвиг «08:00 → 11:00».
+* `DEFAULT_TZ_OFFSET_MIN = 180` (UTC+3, МСК), `STORE_VERSION = 2`;
+  при смене версии формата EEPROM сбрасывается к умолчаниям.
+* `POST /api/time` (`now` = `Math.floor(Date.now()/1000)`, опционально `tz` в
+  минутах = `-getTimezoneOffset()`) — кнопки «Время с телефона» в настройках и в
+  баннере (режим настройки/нет времени). Если NTP уже синхронизирован, ручное
+  время игнорируется (NTP приоритетнее).
 
 ## 6. REST API (кратко)
 
 `GET /api/state`, `GET /api/config`,
 `POST /api/task` (`id=-1` для новой), `POST /api/task/del`, `POST /api/task/run`,
 `POST /api/ch` (`ch`, `sec`; `sec=0` — стоп),
-`POST /api/config`, `POST /api/wifi`, `POST /api/factory`, `POST /api/reboot`.
+`GET /api/scan` (`start=1` — начать поиск; ответ `running` / `done` / `idle`,
+`nets[] = {ssid, rssi, enc}`; сканирование **асинхронное** — `WiFi.scanNetworks(true, true)`
+и опрос `WiFi.scanComplete()`, иначе блокирующий скан рвёт страницу в режиме точки доступа),
+`POST /api/time` (`now`, `tz`), `POST /api/config`, `POST /api/wifi`,
+`POST /api/factory`, `POST /api/reboot`.
+
+Элемент `ch[]` в `/api/state`: `i`, `pin`, `inv`, `on`, `rem` (осталось сек),
+`task` (id задачи или -1), `seq` (счётчик выключений канала), `rsn`
+(`timer` | `manual` | `low` | ""), `run` (сколько секунд реально работал).
+UI сравнивает `seq`: новое значение = показать уведомление о выключении
+(«полив завершён», «низкий уровень воды», «остановлен»). Ручная остановка из UI
+показывает тост сразу и подавляет событие канала на 5 секунд, чтобы не было
+дубля. Не убирайте `seq/rsn/run` — на них держатся уведомления.
 Формат — `application/x-www-form-urlencoded` (на ESP разбирается `server.arg()`,
 JSON-парсера нет намеренно). Ответы — JSON, ошибки `{"ok":false,"error":"..."}`.
 
