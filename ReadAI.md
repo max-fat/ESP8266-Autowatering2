@@ -62,6 +62,7 @@
 | `src/scheduler.h/.cpp` | Расписание: `next_occurrence`, `at_day_time` (локальное время), `nextDue`/`lastRun`, окно «догоняющего» полива, статусы |
 | `src/clock.h/.cpp` | Время: NTP/телефон, UTC + смещение пояса, «локальные секунды эпохи», форматирование строк для UI, арифметика суток |
 | `src/netmgr.h/.cpp` | Состояния Wi-Fi (`BOOT/STA/AP/AP_STA`), captive portal (DNSServer), NTP (`configTime(0,0,...)` — всегда UTC), отложенная перезагрузка, асинхронное сканирование сетей (`net_scan_start/net_scan_state/net_scan_results`) |
+| `src/text.h/.cpp` | Пользовательские строки: `text_set` (обрезка по границе UTF-8, срез пробелов, защита от битых байтов), `text_json_escape`, `text_utf8_len`. Покрыт host-тестами |
 | `src/scanlist.h/.cpp` | Чистая логика списка сетей: отбросить скрытые, склеить дубликаты SSID, отсортировать по сигналу, обрезать до лимита, JSON-экранирование. Покрыта host-тестами |
 | `src/webui.h/.cpp` | HTTP-сервер, REST API, сборка JSON вручную, отдача gzip-страницы |
 | `src/page_html.h` | **Генерируется** из `web/index.html` — не редактировать руками |
@@ -122,7 +123,8 @@
   (`time`, `date`, `lastStr`, `nextStr`) и `timeSrc` (`ntp`/`manual`/`none`).
   Именно из-за форматирования `new Date(epoch)` в браузере раньше появлялся
   сдвиг «08:00 → 11:00».
-* `DEFAULT_TZ_OFFSET_MIN = 180` (UTC+3, МСК), `STORE_VERSION = 2`;
+* `DEFAULT_TZ_OFFSET_MIN = 180` (UTC+3, МСК), `STORE_VERSION = 3`
+  (версия 3 добавила `Settings.name` и `ChannelCfg.name` — имена модуля и каналов);
   при смене версии формата EEPROM сбрасывается к умолчаниям.
 * `POST /api/time` (`now` = `Math.floor(Date.now()/1000)`, опционально `tz` в
   минутах = `-getTimezoneOffset()`) — кнопки «Время с телефона» в настройках и в
@@ -139,6 +141,14 @@
 и опрос `WiFi.scanComplete()`, иначе блокирующий скан рвёт страницу в режиме точки доступа),
 `POST /api/time` (`now`, `tz`), `POST /api/config`, `POST /api/wifi`,
 `POST /api/factory`, `POST /api/reboot`.
+
+Имена: в `/api/state` — `name` (имя модуля, `""` = не задано) и `appName` (название
+прошивки `FW_NAME`), у канала `nm` (имя канала, `""` = «Канал N»); в `/api/config` —
+`name` и `ch[].name`; в `POST /api/config` — `name` и `chN_name`. Пустое имя канала
+интерфейс заменяет на «Канал N», пустое имя модуля — на «Автополив». Имя модуля
+используется и как префикс точки доступа (`<имя>-XXXXXX`, до 24 байт имени).
+Имена хранятся как есть (UTF-8) и **обрезаются по границе символа** функцией
+`text_set` — не заменяйте её на `strncpy`, иначе получите битую кириллицу.
 
 Элемент `ch[]` в `/api/state`: `i`, `pin`, `inv`, `on`, `rem` (осталось сек),
 `task` (id задачи или -1), `seq` (счётчик выключений канала), `rsn`

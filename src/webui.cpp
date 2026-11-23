@@ -9,6 +9,7 @@
 #include "clock.h"
 #include "scheduler.h"
 #include "storage.h"
+#include "text.h"
 #include "netmgr.h"
 #include "page_html.h"
 
@@ -78,7 +79,12 @@ static String build_state_json() {
   char dateBuf[16];
   clock_now_strings(timeBuf, sizeof(timeBuf), dateBuf, sizeof(dateBuf));
 
-  j += F("{\"fw\":\"" FW_VERSION "\",\"name\":\"" FW_NAME "\",");
+  char nameEsc[MODULE_NAME_MAX * 6 + 1];
+  text_json_escape(g_store.cfg.name, nameEsc, sizeof(nameEsc));
+
+  j += F("{\"fw\":\"" FW_VERSION "\",\"appName\":\"" FW_NAME "\",\"name\":\"");
+  j += nameEsc;                 // имя модуля ("" = не задано, UI покажет "Автополив")
+  j += F("\",");
   // Время отдаём строками, посчитанными на устройстве: браузер не должен
   // пересчитывать его в свой часовой пояс.
   j += F("\"now\":");
@@ -212,7 +218,11 @@ static String build_state_json() {
 static String build_config_json() {
   String j;
   j.reserve(700);
-  j += F("{\"ssid\":\"");
+  char nameEsc[MODULE_NAME_MAX * 6 + 1];
+  text_json_escape(g_store.cfg.name, nameEsc, sizeof(nameEsc));
+  j += F("{\"name\":\"");
+  j += nameEsc;
+  j += F("\",\"ssid\":\"");
   j += g_store.cfg.ssid;
   j += F("\",\"hasPass\":");
   j += g_store.cfg.pass[0] ? '1' : '0';
@@ -239,7 +249,11 @@ static String build_config_json() {
     j += String((int)g_store.cfg.ch[i].pin);
     j += F(",\"inv\":");
     j += String((int)g_store.cfg.ch[i].activeLow);
-    j += '}';
+    char nmEsc[CHANNEL_NAME_MAX * 6 + 1];
+    text_json_escape(g_store.cfg.ch[i].name, nmEsc, sizeof(nmEsc));
+    j += F(",\"name\":\"");
+    j += nmEsc;
+    j += F("\"}");
   }
   j += F("]}");
   return j;
@@ -404,6 +418,19 @@ static void handle_config_save() {
     c.ch[i].activeLow = newInv[i];
   }
 
+  if (s_server.hasArg("name")) {
+    String nm = s_server.arg("name");
+    text_set(c.name, sizeof(c.name), nm.c_str());
+  }
+  for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
+    char key[16];
+    snprintf(key, sizeof(key), "ch%u_name", (unsigned)i);
+    if (s_server.hasArg(key)) {
+      String nm = s_server.arg(key);
+      text_set(c.ch[i].name, sizeof(c.ch[i].name), nm.c_str());
+    }
+  }
+
   c.sensorPin = (uint8_t)sensorPin;
   c.sensorActiveLow = arg_bool("sensorInv", c.sensorActiveLow) ? 1 : 0;
   c.sensorPullup = arg_bool("sensorPull", c.sensorPullup) ? 1 : 0;
@@ -514,7 +541,7 @@ static void handle_scan() {
   char esc[SCAN_SSID_MAX * 6 + 1];
   for (uint8_t i = 0; i < count; i++) {
     if (i) j += ',';
-    scanlist_json_escape(nets[i].ssid, esc, sizeof(esc));
+    text_json_escape(nets[i].ssid, esc, sizeof(esc));
     j += F("{\"ssid\":\"");
     j += esc;
     j += F("\",\"rssi\":");

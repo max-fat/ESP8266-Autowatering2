@@ -11,13 +11,13 @@
 #include <stdint.h>
 
 #define FW_NAME     "ESP8266-Autowatering2"
-#define FW_VERSION  "1.3.0"
+#define FW_VERSION  "1.4.0"
 
 /* ---------- Ограничения ---------- */
 #define NUM_CHANNELS      4       // число помп (каналов)
 #define MAX_TASKS         8       // максимум задач полива
 #define STORE_MAGIC       0x41574532UL   /* "AWE2" */
-#define STORE_VERSION     2   /* изменения формата = сброс к умолчаниям */
+#define STORE_VERSION     3   /* изменения формата = сброс к умолчаниям */
 #define EEPROM_BYTES      1024    // размер эмулированного EEPROM под наше хранилище
 
 /* ---------- Умолчания для пинов ----------
@@ -41,6 +41,13 @@
 #define DEFAULT_NTP_SERVER       "pool.ntp.org"
 #define DEFAULT_AP_PREFIX        "AutoWater-"
 
+/* ---------- Имена (модуль и каналы) ----------
+ * Хранятся в UTF-8. Пустая строка = имя по умолчанию: для модуля это
+ * "Автополив" (рисует интерфейс), для канала - "Канал N".
+ */
+#define MODULE_NAME_MAX   32      // байт под имя модуля (без завершающего нуля)
+#define CHANNEL_NAME_MAX  32      // байт под имя канала
+
 #define TASK_MIN_DURATION_SEC    1
 #define TASK_MAX_DURATION_SEC    3600
 #define TASK_MAX_PERIOD_DAYS     60
@@ -49,7 +56,7 @@
 struct ChannelCfg {
   uint8_t pin;         // номер GPIO
   uint8_t activeLow;   // 1 = помпа включена при НИЗКОМ уровне на пине (реле-модуль)
-  uint8_t reserved;
+  char    name[CHANNEL_NAME_MAX + 1];  // что поливает канал ("Орхидеи", "Томаты")
 };
 
 struct TaskCfg {
@@ -65,6 +72,7 @@ struct TaskCfg {
 };
 
 struct Settings {
+  char     name[MODULE_NAME_MAX + 1];  // имя модуля ("Теплица", "Балкон")
   char     ssid[33];
   char     pass[65];
   char     ntpServer[33];

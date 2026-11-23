@@ -17,6 +17,7 @@
 #include "../../src/scanlist.h"
 #include "../../src/scheduler.h"
 #include "../../src/storage.h"
+#include "../../src/text.h"
 
 // --- заглушки, которые ждут модули прошивки ---
 uint32_t g_millis = 0;
@@ -106,9 +107,14 @@ static void test_storage() {
   CHECK_EQ(g_store.cfg.tzOffsetMin, DEFAULT_TZ_OFFSET_MIN);  // UTC+3 (МСК)
   CHECK_EQ(g_store.version, STORE_VERSION);
   CHECK(strcmp(g_store.cfg.ntpServer, DEFAULT_NTP_SERVER) == 0);
+  CHECK_EQ(g_store.cfg.name[0], 0);         // имя модуля не задано
+  for (uint8_t i = 0; i < NUM_CHANNELS; i++) CHECK_EQ(g_store.cfg.ch[i].name[0], 0);
 
   // сохранение и повторная загрузка
   strcpy(g_store.cfg.ssid, "HomeNet");
+  strcpy(g_store.cfg.name, "Теплица");
+  strcpy(g_store.cfg.ch[0].name, "Орхидеи");
+  strcpy(g_store.cfg.ch[2].name, "Томаты");
   g_store.tasks[0].used = 1;
   g_store.tasks[0].channel = 2;
   g_store.tasks[0].hour = 7;
@@ -120,6 +126,10 @@ static void test_storage() {
   memset(&g_store, 0, sizeof(g_store));
   CHECK_EQ(storage_begin(), 1);             // данные валидны
   CHECK(strcmp(g_store.cfg.ssid, "HomeNet") == 0);
+  CHECK(strcmp(g_store.cfg.name, "Теплица") == 0);
+  CHECK(strcmp(g_store.cfg.ch[0].name, "Орхидеи") == 0);
+  CHECK(strcmp(g_store.cfg.ch[2].name, "Томаты") == 0);
+  CHECK_EQ(g_store.cfg.ch[1].name[0], 0);
   CHECK_EQ(g_store.tasks[0].used, 1);
   CHECK_EQ(g_store.tasks[0].durationSec, 42);
   CHECK_EQ(g_store.tasks[0].lastRun, (long)g_now);
@@ -132,8 +142,12 @@ static void test_storage() {
 
   // сброс к заводским
   strcpy(g_store.cfg.ssid, "X");
+  strcpy(g_store.cfg.name, "Y");
+  strcpy(g_store.cfg.ch[1].name, "Z");
   storage_factory_reset();
   CHECK_EQ(g_store.cfg.ssid[0], 0);
+  CHECK_EQ(g_store.cfg.name[0], 0);
+  CHECK_EQ(g_store.cfg.ch[1].name[0], 0);
   CHECK_EQ(g_store.tasks[0].used, 0);
 }
 
@@ -502,20 +516,65 @@ static void test_scanlist() {
   CHECK_EQ(scanlist_build(NULL, 0, out, 4), 0);
   CHECK_EQ(scanlist_build(in, 4, out, 0), 0);
 
-  // 5. Экранирование для JSON
+  // 5. Экранирование для JSON (общий модуль text.*)
   char esc[128];
-  scanlist_json_escape("My \"net\" \\ 5G", esc, sizeof(esc));
+  text_json_escape("My \"net\" \\ 5G", esc, sizeof(esc));
   CHECK(strcmp(esc, "My \\\"net\\\" \\\\ 5G") == 0);
-  scanlist_json_escape("a\tb", esc, sizeof(esc));
+  text_json_escape("a\tb", esc, sizeof(esc));
   CHECK(strcmp(esc, "a\\tb") == 0);
-  scanlist_json_escape("", esc, sizeof(esc));
+  text_json_escape("", esc, sizeof(esc));
   CHECK(strcmp(esc, "") == 0);
   // обрезка по размеру буфера: 4 байта -> 3 символа + ноль
-  scanlist_json_escape("abcdef", esc, 4);
+  text_json_escape("abcdef", esc, 4);
   CHECK(strcmp(esc, "abc") == 0);
   // кириллица (UTF-8) проходит без изменений
-  scanlist_json_escape("Сеть", esc, sizeof(esc));
+  text_json_escape("Сеть", esc, sizeof(esc));
   CHECK(strcmp(esc, "Сеть") == 0);
+}
+
+/* ---------------- пользовательские строки: имена модуля и каналов ---------------- */
+static void test_text() {
+  printf("[text]\n");
+
+  char buf[16];
+
+  // 1. обычная строка, пробелы по краям срезаются
+  text_set(buf, sizeof(buf), "  Теплица  ");
+  CHECK(strcmp(buf, "Теплица") == 0);
+
+  // 2. пустая строка и NULL -> пустая строка
+  text_set(buf, sizeof(buf), "");
+  CHECK_EQ(buf[0], 0);
+  text_set(buf, sizeof(buf), NULL);
+  CHECK_EQ(buf[0], 0);
+  text_set(buf, sizeof(buf), "     ");
+  CHECK_EQ(buf[0], 0);
+
+  // 3. обрезка по размеру буфера не рвёт UTF-8: "Орхидеи" = 14 байт
+  //    буфер 5 байт -> 4 байта данных = ровно два символа "Ор"
+  char small[5];
+  text_set(small, sizeof(small), "Орхидеи");
+  CHECK(strcmp(small, "\xD0\x9E\xD1\x80") == 0);
+  CHECK_EQ(text_utf8_len(small), 2);
+  CHECK_EQ(strlen(small), 4);
+
+  // 4. полное имя помещается целиком
+  char full[33];
+  text_set(full, sizeof(full), "Орхидеи на окне");
+  CHECK(strcmp(full, "Орхидеи на окне") == 0);
+
+  // 5. длинное ASCII-имя обрезается по размеру поля
+  char longName[9];
+  text_set(longName, sizeof(longName), "abcdefghijklmno");
+  CHECK(strcmp(longName, "abcdefgh") == 0);
+
+  // 6. битый UTF-8: копирование останавливается на мусоре, без падения
+  text_set(buf, sizeof(buf), "Ok\xFF\xFEBad");
+  CHECK(strcmp(buf, "Ok") == 0);
+
+  // 7. длина в символах
+  CHECK_EQ(text_utf8_len("Канал 1"), 7);
+  CHECK_EQ(text_utf8_len(""), 0);
 }
 
 int main() {
@@ -529,6 +588,7 @@ int main() {
   test_local_schedule();
   test_stop_events();
   test_scanlist();
+  test_text();
 
   printf("\n%d проверок, ошибок: %d\n", g_checks, g_fails);
   return g_fails ? 1 : 0;

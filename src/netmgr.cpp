@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "storage.h"
+#include "text.h"
 #include "scheduler.h"
 
 enum NetState {
@@ -35,10 +36,24 @@ static bool     s_rebootPending = false;
 #define STA_LOST_TIMEOUT_MS     60000UL   // сколько терпим пропадание связи
 #define NTP_RESYNC_MS           (6UL * 3600UL * 1000UL)
 
+// Точка доступа: "AutoWater-XXXXXX" или "<имя модуля>-XXXXXX", если имя задано.
+// Имя помогает отличить два одинаковых модуля в списке сетей телефона.
 static void build_ap_ssid() {
   char id[8];
   snprintf(id, sizeof(id), "%06X", ESP.getChipId() & 0xFFFFFF);
-  snprintf(s_apSsid, sizeof(s_apSsid), "%s%s", DEFAULT_AP_PREFIX, id);
+
+  char prefix[SCAN_SSID_MAX + 1];
+  prefix[0] = '\0';
+  if (g_store.cfg.name[0]) {
+    // 24 байта на имя + "-XXXXXX" = максимум 32 байта SSID
+    text_set(prefix, 24 + 1, g_store.cfg.name);
+  }
+
+  if (prefix[0]) {
+    snprintf(s_apSsid, sizeof(s_apSsid), "%s-%s", prefix, id);
+  } else {
+    snprintf(s_apSsid, sizeof(s_apSsid), "%s%s", DEFAULT_AP_PREFIX, id);
+  }
 }
 
 static void start_ntp() {

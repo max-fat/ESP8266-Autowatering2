@@ -125,7 +125,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
 <header>
   <div>
-    <div class="brand"><span class="dot"></span> Автополив</div>
+    <div class="brand"><span class="dot"></span> <span id="brandName">Автополив</span></div>
     <div class="sub" id="wifiLine">подключение…</div>
   </div>
   <div class="hright">
@@ -184,6 +184,20 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <!-- ================= НАСТРОЙКИ ================= -->
   <section id="tab-settings">
     <div class="card">
+      <h2>Модуль</h2>
+      <div class="grid">
+        <label>Имя модуля<input id="s_name" maxlength="32" placeholder="Например: Теплица"></label>
+      </div>
+      <div class="actions">
+        <button class="primary" id="btnName">Сохранить имя</button>
+      </div>
+      <p class="hint">Имя видно в шапке страницы и в заголовке вкладки браузера — удобно, когда
+        модулей несколько. Оно же попадает в имя точки доступа настройки: вместо
+        <code>AutoWater-XXXXXX</code> будет <code>Имя-XXXXXX</code> (применяется после перезагрузки).
+        Если имя не задано, показывается «Автополив».</p>
+    </div>
+
+    <div class="card">
       <h2>Wi-Fi</h2>
       <div class="grid">
         <div>
@@ -207,6 +221,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <div class="card">
       <h2>Помпы</h2>
       <div class="grid" id="pumpSettings"></div>
+      <p class="hint">Имя канала — это то, что он поливает: «Орхидеи», «Томаты», «Газон». Оно видно на
+        вкладке «Каналы», в задачах и в уведомлениях, поэтому при нескольких модулях сразу понятно,
+        какой канал за что отвечает. Пустое имя = «Канал N».</p>
       <p class="hint">По умолчанию выбраны пины, которые при включении питания находятся в низком уровне
         (GPIO4, GPIO5, GPIO12, GPIO14). «Инверсия» включает помпу низким уровнем — так работают многие
         модули реле.</p>
@@ -269,6 +286,29 @@ const chStopSeq = [];        // последний увиденный seq вык
 const chSuppressUntil = [];  // до какого времени не дублировать уведомление
 
 const $ = id => document.getElementById(id);
+
+/* Имя канала, заданное пользователем, или «Канал N» по умолчанию. */
+function chTitle(i){
+  const n = (st && st.ch && st.ch[i] && st.ch[i].nm) ? st.ch[i].nm : '';
+  return n ? n : ('Канал ' + (i+1));
+}
+
+function chOptionLabel(i){
+  const n = (st && st.ch && st.ch[i] && st.ch[i].nm) ? st.ch[i].nm : '';
+  const pin = (st && st.ch && st.ch[i]) ? st.ch[i].pin : '?';
+  return n ? ((i+1) + ' · ' + n) : ('Канал ' + (i+1) + ' (GPIO' + pin + ')');
+}
+
+function refreshChOptions(){
+  const sel = $('t_ch');
+  if(!sel || !sel.options.length) return;
+  const cur = sel.value;
+  for(const o of sel.options){
+    const i = parseInt(o.value, 10);
+    if(!isNaN(i)) o.textContent = chOptionLabel(i);
+  }
+  sel.value = cur;
+}
 
 function toast(msg, isErr){
   const t = $('toast');
@@ -463,6 +503,11 @@ function selectTab(name){
 
 /* ---------- шапка ---------- */
 function renderHeader(){
+  const custom = (st.name || '').trim();
+  const modName = custom || 'Автополив';
+  $('brandName').textContent = modName;
+  const title = custom ? (modName + ' — Автополив') : 'Автополив';
+  if(document.title !== title) document.title = title;
   $('clock').textContent = st.time;
   $('date').textContent = st.date;
   const wb = $('waterBadge');
@@ -517,7 +562,7 @@ function renderTasks(){
   }
   let html = '';
   for(const t of st.tasks){
-    const chName = 'Канал ' + (t.ch+1) + ' (GPIO' + st.ch[t.ch].pin + ')';
+    const chName = chTitle(t.ch);
     html += '<div class="task">' +
       '<div class="top"><div>' +
         '<div class="title">' + chName + ' · ' + String(t.h).padStart(2,'0') + ':' + String(t.m).padStart(2,'0') + '</div>' +
@@ -599,8 +644,9 @@ function buildChannels(){
   let html = '';
   for(let i=0;i<st.limits.channels;i++){
     html += '<div class="ch" id="ch' + i + '">' +
-      '<div class="name"><span>Канал ' + (i+1) + '</span><span class="pill off" id="chp' + i + '">выкл</span></div>' +
-      '<div class="state">GPIO' + st.ch[i].pin + ' <span id="chs' + i + '"></span></div>' +
+      '<div class="name"><span class="chnm" id="chnm' + i + '"></span>' +
+      '<span class="pill off" id="chp' + i + '">выкл</span></div>' +
+      '<div class="state"><span id="chsub' + i + '"></span> <span id="chs' + i + '"></span></div>' +
       '<div class="row"><input type="number" id="chsec' + i + '" min="1" max="' + st.limits.maxRun + '" value="30">' +
       '<button class="small primary" data-ch="' + i + '" data-sec="1">▶</button></div>' +
       '<div class="row" style="margin-top:8px"><button class="small" data-ch="' + i + '" data-sec="0">Стоп</button></div>' +
@@ -615,11 +661,11 @@ function buildChannels(){
       try{
         await post('/api/ch', {ch:i, sec});
         if(run){
-          toast('Канал ' + (i+1) + ' включён на ' + sec + ' с');
+          toast(chTitle(i) + ': включён на ' + sec + ' с');
         } else {
           // сразу даём обратную связь, а событие с устройства (≤2 с) не дублируем
           chSuppressUntil[i] = Date.now() + 5000;
-          toast('Канал ' + (i+1) + ' остановлен');
+          toast(chTitle(i) + ': остановлен');
         }
         await load();
       }catch(e){ toast(errText(e), true); }
@@ -631,7 +677,7 @@ function buildChannels(){
 /* Уведомление о выключении канала: устройство сообщает причину
    (timer - истекло время, manual - остановили вручную, low - низкий уровень воды). */
 function notifyChannelStopped(i, rsn, run){
-  const name = 'Канал ' + (i+1);
+  const name = chTitle(i);
   if(rsn === 'timer'){
     toast(name + ': полив завершён' + (run ? ' (' + run + ' с)' : ''));
   } else if(rsn === 'low'){
@@ -658,6 +704,10 @@ function renderChannels(){
 
     const card = $('ch'+i);
     if(!card) continue;
+    const nmEl = $('chnm'+i);
+    if(nmEl) nmEl.textContent = chTitle(i);
+    const subEl = $('chsub'+i);
+    if(subEl) subEl.textContent = (c.nm ? ('Канал ' + (i+1) + ' · ') : '') + 'GPIO' + c.pin;
     card.classList.toggle('on', !!c.on);
     const pill = $('chp'+i);
     pill.className = 'pill ' + (c.on ? 'running' : 'off');
@@ -675,6 +725,7 @@ function renderChannels(){
 async function loadConfig(){
   try{
     const c = await getJson('/api/config');
+    $('s_name').value = c.name || '';
     $('s_ssid').value = c.ssid || '';
     $('s_ntp').value = c.ntp || 'pool.ntp.org';
     buildTzOptions();
@@ -698,6 +749,8 @@ async function loadConfig(){
     for(let i=0;i<c.ch.length;i++){
       html += '<div><label>Канал ' + (i+1) + ', GPIO<input type="number" id="s_chpin' + i +
         '" min="0" max="16" value="' + c.ch[i].pin + '"></label>' +
+        '<label>Что поливает (имя канала)<input id="s_chname' + i + '" maxlength="32" value="' +
+        escHtml(c.ch[i].name || '') + '" placeholder="Например: Орхидеи"></label>' +
         '<label class="chk"><input type="checkbox" id="s_chinv' + i + '"' + (c.ch[i].inv ? ' checked' : '') +
         '> Инверсия (вкл. низким)</label></div>';
     }
@@ -720,6 +773,7 @@ $('btnCfg').addEventListener('click', async ()=>{
   for(let i=0;i<st.limits.channels;i++){
     data['ch'+i+'_pin'] = parseInt($('s_chpin'+i).value,10);
     data['ch'+i+'_inv'] = $('s_chinv'+i).checked;
+    data['ch'+i+'_name'] = $('s_chname'+i).value;
   }
   try{
     await post('/api/config', data);
@@ -729,6 +783,17 @@ $('btnCfg').addEventListener('click', async ()=>{
 });
 
 $('btnScan').addEventListener('click', startScan);
+
+/* Имя модуля сохраняется отдельной кнопкой: оно не влияет на полив и его
+   не нужно перепроверять вместе с пинами. */
+$('btnName').addEventListener('click', async ()=>{
+  try{
+    const r = await post('/api/config', {name: $('s_name').value});
+    const nm = $('s_name').value.trim();
+    toast(nm ? ('Имя модуля: ' + nm) : 'Имя модуля сброшено');
+    await load();
+  }catch(e){ toast(errText(e), true); }
+});
 
 $('btnPhoneTime').addEventListener('click', ()=> sendPhoneTime(false));
 $('btnPhoneTimeTz').addEventListener('click', ()=> sendPhoneTime(true));
@@ -755,7 +820,8 @@ $('btnFactory').addEventListener('click', async ()=>{
 
 function renderInfo(){
   $('infoBox').innerHTML =
-    '<div>Прошивка</div><div>' + st.name + ' ' + st.fw + '</div>' +
+    '<div>Имя модуля</div><div>' + escHtml((st.name || '').trim() || 'не задано (Автополив)') + '</div>' +
+    '<div>Прошивка</div><div>' + st.appName + ' ' + st.fw + '</div>' +
     '<div>Режим Wi-Fi</div><div>' + st.wifi.mode + '</div>' +
     '<div>IP</div><div>' + (st.wifi.connected ? st.wifi.ip : '—') + '</div>' +
     '<div>Точка доступа</div><div>' + (st.wifi.apActive ? st.wifi.apSsid + ' / ' + st.wifi.apIp : 'выключена') + '</div>' +
@@ -787,6 +853,7 @@ async function load(){
   renderTasks();
   renderChannels();
   renderInfo();
+  refreshChOptions();
 
   if(!st.wifi.configured && !window._autoSetup){
     window._autoSetup = true;
