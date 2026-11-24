@@ -1,8 +1,8 @@
 firmware : autowatering-esp8266.bin
-built    : 2026-11-24 12:01:27 UTC
-version  : 1.5.2
-size     : 314768 bytes
-md5      : c2a54cd78c175342781bfed085625c40
+built    : 2026-11-24 12:37:54 UTC
+version  : 1.5.3
+size     : 314800 bytes
+md5      : 49c8ea68d16d58080b6dbbafec07ad70
 flash    : mode=dout freq=40MHz size=4M ld=eagle.flash.4m.ld
 toolchain: 4.8.2 (xtensa-lx106-elf-g++)
 core     : Arduino-2.4.2

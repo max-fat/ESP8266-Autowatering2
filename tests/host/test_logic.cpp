@@ -712,7 +712,9 @@ static void test_webjson() {
   CHECK_EQ(count_substr(s, "\"nm\":"), NUM_CHANNELS);
   CHECK(strstr(s, "\"name\":\"Теплица\"") != NULL);
   CHECK(strstr(s, "\"appName\":\"ESP8266-Autowatering2\"") != NULL);
-  CHECK(strstr(s, "\"fw\":\"1.5.1\"") != NULL);
+  // Версия в состоянии обязана совпадать с прошивкой (иначе UI врёт).
+  String fwField = String("\"fw\":\"") + FW_VERSION + "\"";
+  CHECK(strstr(s, fwField.c_str()) != NULL);
   CHECK(strstr(s, "\"limits\":{") != NULL);
   CHECK(strstr(s, "\"tasks\":[") != NULL);
   CHECK_EQ(count_substr(s, "\"seq\":"), NUM_CHANNELS);
