@@ -19,6 +19,7 @@
 #include "../../src/storage.h"
 #include "../../src/text.h"
 #include "../../src/transfer.h"
+#include "../../src/webjson.h"
 
 // --- заглушки, которые ждут модули прошивки ---
 uint32_t g_millis = 0;
@@ -29,6 +30,19 @@ uint8_t  g_eeprom[FAKE_EEPROM_SIZE];
 int      g_eeprom_commits = 0;
 SerialStub Serial;
 EEPROMStub EEPROM;
+
+EspStub ESP = { 30000 };          // «свободная память» для /api/state
+
+/* Заглушки netmgr: сборщик JSON берёт из них состояние Wi-Fi. */
+static String g_netIp = "192.168.1.50";
+bool   net_connected() { return true; }
+bool   net_ap_active() { return false; }
+bool   net_wifi_configured() { return true; }
+String net_ip() { return g_netIp; }
+String net_ap_ip() { return "192.168.4.1"; }
+String net_ap_ssid() { return "AutoWater-00A1B2"; }
+String net_mode_str() { return "sta"; }
+int    net_rssi() { return -55; }
 
 static time_t g_now = 0;
 extern "C" time_t time(time_t* t) {
@@ -652,9 +666,98 @@ static void test_transfer() {
   CHECK(transfer_task_encode(t, small, sizeof(small)) == false);
 }
 
-int main() {
+/* ---------------- JSON для интерфейса (webjson.*) ---------------- */
+static int count_substr(const char* hay, const char* needle) {
+  int n = 0;
+  const char* p = hay;
+  size_t len = strlen(needle);
+  while ((p = strstr(p, needle)) != NULL) {
+    n++;
+    p += len;
+  }
+  return n;
+}
+
+static void json_sample() {
+  reset_all();
+  storage_begin();
+  strcpy(g_store.cfg.name, "Теплица");
+  strcpy(g_store.cfg.ch[0].name, "Орхидея");
+  g_store.cfg.ch[1].name[0] = 0;
+  strcpy(g_store.cfg.ch[2].name, "Томаты");
+  strcpy(g_store.cfg.ch[3].name, "Газон");
+  strcpy(g_store.cfg.ssid, "HomeNet");
+  strcpy(g_store.cfg.pass, "secret123");
+  g_store.tasks[0].used = 1;
+  g_store.tasks[0].enabled = 1;
+  g_store.tasks[0].channel = 2;
+  g_store.tasks[0].hour = 8;
+  g_store.tasks[0].minute = 30;
+  g_store.tasks[0].durationSec = 45;
+  g_store.tasks[0].periodDays = 2;
+  g_now = (time_t)1795000000UL;
+  g_millis = 90000;
+}
+
+static void test_webjson() {
+  printf("[web json]\n");
+  json_sample();
+
+  // 1. имя канала обязано быть в /api/state — на нём держится подпись
+  //    «Канал 1 · Орхидея» на вкладках «Каналы» и «Задачи»
+  String st = webjson_state();
+  const char* s = st.c_str();
+  CHECK(strstr(s, "\"nm\":\"Орхидея\"") != NULL);
+  CHECK(strstr(s, "\"nm\":\"\"") != NULL);          // канал без имени
+  CHECK_EQ(count_substr(s, "\"nm\":"), NUM_CHANNELS);
+  CHECK(strstr(s, "\"name\":\"Теплица\"") != NULL);
+  CHECK(strstr(s, "\"appName\":\"ESP8266-Autowatering2\"") != NULL);
+  CHECK(strstr(s, "\"fw\":\"1.5.1\"") != NULL);
+  CHECK(strstr(s, "\"limits\":{") != NULL);
+  CHECK(strstr(s, "\"tasks\":[") != NULL);
+  CHECK_EQ(count_substr(s, "\"seq\":"), NUM_CHANNELS);
+  CHECK(strstr(s, "\"heap\":30000") != NULL);
+  CHECK(strstr(s, "\"uptime\":90") != NULL);
+
+  // 2. кавычки в имени экранируются, JSON не ломается
+  strcpy(g_store.cfg.ch[1].name, "Мамин \"угол\"");
+  String st2 = webjson_state();
+  CHECK(strstr(st2.c_str(), "\"nm\":\"Мамин \\\"угол\\\"\"") != NULL);
+
+  // 3. /api/config отдаёт имена для полей настроек
+  String cfg = webjson_config();
+  CHECK(strstr(cfg.c_str(), "\"name\":\"Орхидея\"") != NULL);
+  CHECK(strstr(cfg.c_str(), "\"ssid\":\"HomeNet\"") != NULL);
+
+  // 4. экспорт: версия формата, задачи, и НИКАКОГО пароля
+  String ex = webjson_export();
+  const char* e = ex.c_str();
+  CHECK(strstr(e, "\"app\":\"ESP8266-Autowatering2\"") != NULL);
+  CHECK(strstr(e, "\"sv\":3") != NULL);
+  CHECK(strstr(e, "\"cfg\":{") != NULL);
+  CHECK(strstr(e, "\"tasks\":[") != NULL);
+  CHECK(strstr(e, "\"dur\":45") != NULL);
+  CHECK(strstr(e, "\"pd\":2") != NULL);
+  CHECK(strstr(e, "\"name\":\"Газон\"") != NULL);
+  CHECK(strstr(e, "secret123") == NULL);          // Wi-Fi не выгружается
+  CHECK(strstr(e, "HomeNet") == NULL);
+}
+
+int main(int argc, char** argv) {
   setenv("TZ", "UTC", 1);
   tzset();
+
+  // Режимы для проверки JSON настоящим парсером (tests/host/check_json.py).
+  // Ничего лишнего в stdout: только JSON.
+  if (argc > 1) {
+    json_sample();
+    String out;
+    if (strcmp(argv[1], "--dump-state") == 0)       out = webjson_state();
+    else if (strcmp(argv[1], "--dump-config") == 0) out = webjson_config();
+    else if (strcmp(argv[1], "--dump-export") == 0) out = webjson_export();
+    printf("%s\n", out.c_str());
+    return 0;
+  }
 
   test_storage();
   test_channels();
@@ -665,6 +768,7 @@ int main() {
   test_scanlist();
   test_text();
   test_transfer();
+  test_webjson();
 
   printf("\n%d проверок, ошибок: %d\n", g_checks, g_fails);
   return g_fails ? 1 : 0;

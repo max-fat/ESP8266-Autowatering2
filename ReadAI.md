@@ -65,6 +65,7 @@
 | `src/text.h/.cpp` | Пользовательские строки: `text_set` (обрезка по границе UTF-8, срез пробелов, защита от битых байтов), `text_json_escape`, `text_utf8_len`. Покрыт host-тестами |
 | `src/transfer.h/.cpp` | Обмен настройками/задачами: `transfer_task_encode/decode` — задача одной строкой `ch,h,m,dur,pd,en,last,next` (без JSON-парсера на устройстве), проверка диапазонов. Покрыт host-тестами |
 | `src/scanlist.h/.cpp` | Чистая логика списка сетей: отбросить скрытые, склеить дубликаты SSID, отсортировать по сигналу, обрезать до лимита, JSON-экранирование. Покрыта host-тестами |
+| `src/webjson.h/.cpp` | Сборка JSON для `/api/state`, `/api/config`, `/api/export` — без HTTP, поэтому проверяется host-тестами (`test_webjson`, `tests/host/check_json.py`). Добавили поле в JSON — добавьте проверку сюда: пропавшее поле не ломает сборку, но ломает интерфейс |
 | `src/webui.h/.cpp` | HTTP-сервер, REST API, сборка JSON вручную, отдача gzip-страницы |
 | `src/page_html.h` | **Генерируется** из `web/index.html` — не редактировать руками |
 | `web/index.html` | Интерфейс: 3 вкладки, опрос `/api/state` каждые 2 с |
