@@ -74,6 +74,21 @@ def check_export(d):
     print("export ok: задач %d, версия формата %s" % (len(d.get("tasks", [])), d.get("sv")))
 
 
+def check_ota(d):
+    for key in ("fw", "state", "stateText", "received", "total", "maxSize", "minSize",
+                "freeHeap", "err"):
+        check(key in d, "нет поля %s" % key)
+    check(isinstance(d.get("state"), int) and 0 <= d["state"] <= 3, "state вне 0..3")
+    check(d.get("stateText") in ("idle", "running", "done", "error"),
+          "stateText не из набора: %r" % d.get("stateText"))
+    for key in ("received", "total", "maxSize", "minSize", "freeHeap"):
+        check(isinstance(d.get(key), int) and d[key] >= 0, "%s не число" % key)
+    check(d.get("minSize") == 32 * 1024, "minSize должен быть 32 КБ")
+    check(isinstance(d.get("err"), str), "err не строка")
+    print("ota ok: прошивка %s, состояние %s, свободно %d КБ"
+          % (d.get("fw"), d.get("stateText"), d.get("maxSize", 0) // 1024))
+
+
 def main():
     if len(sys.argv) < 2:
         print("использование: check_json.py state|config|export < json")
@@ -87,7 +102,8 @@ def main():
         print(raw[:400])
         return 1
 
-    {"state": check_state, "config": check_config, "export": check_export}[what](data)
+    {"state": check_state, "config": check_config, "export": check_export,
+     "ota": check_ota}[what](data)
     if FAILS:
         for f in FAILS:
             print("  FAIL " + f)

@@ -8,6 +8,7 @@
 #include "app_config.h"
 #include "channels.h"
 #include "netmgr.h"
+#include "ota.h"
 #include "scheduler.h"
 #include "storage.h"
 #include "webui.h"
@@ -54,6 +55,7 @@ void loop() {
   net_update();
   webui_update();
   channels_update();
+  ota_update();          // отложенная перезагрузка после обновления прошивки
 
   uint32_t now = millis();
   if (now - s_lastSched >= 1000) {

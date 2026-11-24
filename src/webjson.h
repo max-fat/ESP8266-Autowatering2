@@ -14,6 +14,10 @@
 String webjson_state();    // GET /api/state - всё, что нужно интерфейсу
 String webjson_config();   // GET /api/config - настройки
 String webjson_export();   // GET /api/export - файл резервной копии
+String webjson_ota();      // GET /api/ota - обновление прошивки: состояние и место
+
+// Состояние обновления -> строка для UI ("idle" / "running" / "done" / "error").
+const char* ota_state_str(uint8_t state);
 
 // Причина выключения канала -> строка для UI ("timer" / "manual" / "low" / "").
 const char* stop_reason_str(uint8_t reason);
