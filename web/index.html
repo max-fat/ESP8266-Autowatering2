@@ -114,6 +114,13 @@ button:disabled{opacity:.45;cursor:not-allowed}
 }
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .toast.err{border-color:#6b2430;background:#2a1218;color:#ffc9c9}
+.filein{padding:9px;border:1px dashed var(--line);border-radius:10px;background:#0d1728;
+  color:var(--txt);font-size:13px;max-width:100%}
+.otaprog{display:none;height:8px;margin-top:12px;border-radius:999px;overflow:hidden;
+  background:#0d1728;border:1px solid var(--line)}
+.otaprog.show{display:block}
+.otabar{height:100%;width:0;border-radius:999px;
+  background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width .2s}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;font-size:13px;align-items:baseline}
 .kv div:nth-child(odd){color:var(--muted);white-space:nowrap}
 .kv div:nth-child(even){min-width:0;overflow-wrap:anywhere}
@@ -265,6 +272,21 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <div class="card">
       <h2>Информация</h2>
       <div class="kv" id="infoBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Обновление прошивки</h2>
+      <p class="hint" style="margin-top:0">Файл <b>autowatering-esp8266.bin</b> — тот, что лежит в папке
+        <code>firmware</code> проекта. Обновление идёт по Wi-Fi, кабель и esptool не нужны. Полив на время
+        обновления останавливается, модуль перезагружается сам; настройки, задачи и имена каналов
+        сохраняются. Если прошивка не подошла или связь оборвалась, модуль продолжит работать на старой.</p>
+      <p class="hint" id="otaSpace">Свободно под новый образ: —</p>
+      <div class="actions" style="padding-top:0">
+        <input class="filein" type="file" id="otaFile" accept=".bin,application/octet-stream">
+        <button class="primary" id="btnOta" disabled>Обновить прошивку</button>
+      </div>
+      <div class="otaprog" id="otaProg"><div class="otabar" id="otaBar"></div></div>
+      <p class="hint" id="otaMsg"></p>
     </div>
 
     <div class="card">
@@ -902,6 +924,109 @@ $('pumpSettings').addEventListener('change', (ev)=>{
   saveChannelName(parseInt(m[1], 10), el.value);
 });
 
+/* ---------- обновление прошивки по Wi-Fi ---------- */
+let otaBusy = false;   // идёт отправка: опрос /api/state на это время замолкает
+let otaMax = 0;        // сколько влезает под новый образ (байт)
+
+const fmtKb = n => Math.round((n || 0) / 1024) + ' КБ';
+
+function setOtaProgress(p){
+  p = Math.max(0, Math.min(1, p || 0));
+  $('otaProg').classList.add('show');
+  $('otaBar').style.width = (p * 100).toFixed(1) + '%';
+}
+
+async function loadOtaInfo(){
+  try{
+    const o = await getJson('/api/ota');
+    otaMax = o.maxSize || 0;
+    $('otaSpace').textContent = 'Сейчас на модуле прошивка ' + o.fw +
+      '. Свободно под новый образ: ' + fmtKb(otaMax) + '.';
+    if(o.state === 3 && o.err){
+      $('otaMsg').textContent = 'Прошлое обновление не удалось: ' + o.err;
+      $('otaMsg').style.color = 'var(--warn)';
+    }
+  }catch(e){ /* модуль может быть занят - не мешаем работе */ }
+}
+
+/* Те же правила, что и в прошивке (src/otacheck.cpp): ошибка видна до отправки. */
+function otaCheck(f){
+  if(!f) return 'Выберите файл прошивки (.bin)';
+  if(!/\.bin$/i.test(f.name)) return 'Нужен файл .bin — например, autowatering-esp8266.bin';
+  if(f.size < 32 * 1024) return 'Файл слишком маленький — это не прошивка';
+  if(otaMax && f.size > otaMax) return 'Файл больше свободного места (' + fmtKb(otaMax) + ')';
+  return '';
+}
+
+$('otaFile').addEventListener('change', ()=>{
+  const f = $('otaFile').files[0];
+  const err = otaCheck(f);
+  $('btnOta').disabled = !!err || otaBusy;
+  $('otaMsg').style.color = err ? 'var(--warn)' : '';
+  $('otaMsg').textContent = err ? err : (f.name + ' · ' + fmtKb(f.size));
+});
+
+$('btnOta').addEventListener('click', ()=>{
+  const f = $('otaFile').files[0];
+  const err = otaCheck(f);
+  if(err){ toast(err, true); return; }
+  if(!confirm('Обновить прошивку на ' + f.name + ' (' + fmtKb(f.size) + ')?\n\n' +
+              'Полив будет остановлен, модуль перезагрузится. Настройки и задачи сохранятся.')) return;
+  otaUpload(f);
+});
+
+function otaUpload(file){
+  otaBusy = true;
+  $('btnOta').disabled = true;
+  $('otaMsg').style.color = '';
+  $('otaMsg').textContent = 'Отправка ' + fmtKb(file.size) + '… не закрывайте страницу';
+  setOtaProgress(0);
+
+  const fd = new FormData();
+  fd.append('firmware', file, file.name);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/ota');
+  xhr.upload.onprogress = e => { if(e.lengthComputable) setOtaProgress(e.loaded / e.total); };
+  xhr.onload = ()=>{
+    let r = {};
+    try{ r = JSON.parse(xhr.responseText || '{}'); }catch(e){}
+    if(xhr.status === 200 && r.ok){
+      setOtaProgress(1);
+      $('otaMsg').textContent = 'Прошивка принята (' + fmtKb(r.size || file.size) + '). Ждём перезагрузку…';
+      waitOtaReboot();
+    }else{
+      otaFailed(r.error || ('HTTP ' + xhr.status));
+    }
+  };
+  xhr.onerror = ()=> otaFailed('связь оборвалась');
+  xhr.send(fd);
+}
+
+function otaFailed(msg){
+  otaBusy = false;
+  $('btnOta').disabled = false;
+  $('otaMsg').textContent = 'Не удалось обновить: ' + msg;
+  $('otaMsg').style.color = 'var(--err)';
+  toast('Обновление не удалось: ' + msg, true);
+}
+
+/* Модуль перезагружается: ждём, пока он снова ответит, и обновляем страницу. */
+async function waitOtaReboot(){
+  const t0 = Date.now();
+  while(Date.now() - t0 < 90000){
+    await new Promise(r => setTimeout(r, 2000));
+    try{
+      const s = await getJson('/api/state');
+      if(s && s.fw){ location.reload(); return; }
+    }catch(e){ /* ещё загружается */ }
+  }
+  otaBusy = false;
+  $('btnOta').disabled = false;
+  $('otaMsg').textContent = 'Модуль не ответил за 90 секунд. Проверьте питание и обновите страницу.';
+  $('otaMsg').style.color = 'var(--warn)';
+}
+
 $('btnImport').addEventListener('click', ()=> $('importFile').click());
 
 $('importFile').addEventListener('change', async (ev)=>{
@@ -993,6 +1118,8 @@ function renderInfo(){
 
 /* ---------- цикл обновления ---------- */
 async function load(){
+  // Пока идёт отправка прошивки, модуль занят записью flash - не дёргаем его.
+  if(otaBusy) return;
   try{
     st = await getJson('/api/state');
   }catch(e){
@@ -1000,6 +1127,8 @@ async function load(){
     return;
   }
   if(!cfgLoaded) await loadConfig();
+
+  if(!window._otaInfo){ window._otaInfo = true; loadOtaInfo(); }
 
   if(!chBuilt && $('t_ch').options.length === 0){
     let opts = '';

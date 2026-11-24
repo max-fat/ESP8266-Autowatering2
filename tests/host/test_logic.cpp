@@ -20,6 +20,7 @@
 #include "../../src/text.h"
 #include "../../src/transfer.h"
 #include "../../src/webjson.h"
+#include "../../src/otacheck.h"
 
 // --- заглушки, которые ждут модули прошивки ---
 uint32_t g_millis = 0;
@@ -43,6 +44,14 @@ String net_ap_ip() { return "192.168.4.1"; }
 String net_ap_ssid() { return "AutoWater-00A1B2"; }
 String net_mode_str() { return "sta"; }
 int    net_rssi() { return -55; }
+
+/* Заглушки модуля обновления: webjson_ota() собирает JSON из этих значений.
+   Сам ota.cpp (Update/flash/перезагрузка) на хосте не собирается. */
+uint8_t  ota_state()      { return 2; }        // OTA_DONE
+uint32_t ota_total()      { return 314800; }
+uint32_t ota_received()   { return 314800; }
+uint32_t ota_max_size()   { return 712704; }
+const char* ota_error()   { return ""; }
 
 static time_t g_now = 0;
 extern "C" time_t time(time_t* t) {
@@ -745,6 +754,71 @@ static void test_webjson() {
   CHECK(strstr(e, "HomeNet") == NULL);
 }
 
+/* ---------------- проверка файла прошивки (otacheck.*) ---------------- */
+static void test_otacheck() {
+  printf("[ota file check]\n");
+  const uint32_t maxSize = 700u * 1024u;
+
+  CHECK(otacheck_file("autowatering-esp8266.bin", 314800, maxSize) == OTA_FILE_OK);
+  CHECK(otacheck_file("FIRMWARE.BIN", 314800, maxSize) == OTA_FILE_OK);
+  CHECK(otacheck_file("a.Bin", 314800, maxSize) == OTA_FILE_OK);
+  CHECK(otacheck_file("fw.bin.txt", 314800, maxSize) == OTA_FILE_EXT);
+  CHECK(otacheck_file("firmware", 314800, maxSize) == OTA_FILE_EXT);
+  CHECK(otacheck_file("bin", 314800, maxSize) == OTA_FILE_EXT);
+  CHECK(otacheck_file("", 314800, maxSize) == OTA_FILE_MISSING);
+  CHECK(otacheck_file(NULL, 314800, maxSize) == OTA_FILE_MISSING);
+  // Путь, который присылает браузер (Chrome отдаёт только имя, но бывает и путь).
+  CHECK(otacheck_file("C:\\build\\autowatering-esp8266.bin", 314800, maxSize) == OTA_FILE_OK);
+
+  CHECK(otacheck_size(OTA_FILE_MIN, maxSize) == OTA_FILE_OK);
+  CHECK(otacheck_size(OTA_FILE_MIN - 1, maxSize) == OTA_FILE_SMALL);
+  CHECK(otacheck_size(0, maxSize) == OTA_FILE_SMALL);
+  CHECK(otacheck_size(maxSize, maxSize) == OTA_FILE_OK);
+  CHECK(otacheck_size(maxSize + 1, maxSize) == OTA_FILE_BIG);
+  // Неизвестный лимит (0) не должен блокировать обновление.
+  CHECK(otacheck_size(900000, 0) == OTA_FILE_OK);
+
+  CHECK(strcmp(otacheck_text(OTA_FILE_OK), "") == 0);
+  CHECK(strlen(otacheck_text(OTA_FILE_EXT)) > 0);
+  CHECK(strlen(otacheck_text(OTA_FILE_BIG)) > 0);
+  CHECK(strlen(otacheck_text(OTA_FILE_SMALL)) > 0);
+  CHECK(strlen(otacheck_text(OTA_FILE_MISSING)) > 0);
+}
+
+/* ---------------- геометрия OTA для нашей раскладки flash ----------------
+ * Раскладка eagle.flash.4m.ld: _SPIFFS_start = 0x40300000, значит область под
+ * прошивки - первые 1 МБ. Updater пишет новый образ в её конец:
+ *   start = 0x100000 - roundup(Content-Length)
+ * и требует start >= roundup(текущая прошивка), иначе затрёт работающий код.
+ * Тест берёт настоящий собранный .bin: если прошивка вырастет настолько, что
+ * обновление по Wi-Fi перестанет помещаться, это будет видно здесь.
+ */
+static void test_ota_geometry() {
+  printf("[ota geometry]\n");
+  const uint32_t updateEnd = 0x100000;   // до _SPIFFS_start
+
+  FILE* f = fopen("../../firmware/autowatering-esp8266.bin", "rb");
+  CHECK(f != NULL);
+  uint32_t fwSize = 0;
+  if (f) {
+    fseek(f, 0, SEEK_END);
+    fwSize = (uint32_t)ftell(f);
+    fclose(f);
+  }
+  CHECK(fwSize > 0);
+
+  uint32_t sketchRounded = (fwSize + 0xFFF) & ~0xFFFu;
+  uint32_t incoming = fwSize + 512;                // Content-Length = файл + multipart
+  uint32_t incomingRounded = (incoming + 0xFFF) & ~0xFFFu;
+  uint32_t startAddress = updateEnd - incomingRounded;
+
+  CHECK(startAddress >= sketchRounded);            // второй образ не залезет на текущий
+  CHECK(incoming <= updateEnd - sketchRounded);    // и влезает в свободное место
+  CHECK(updateEnd - sketchRounded > OTA_FILE_MIN); // запас не выродился
+  printf("  прошивка %lu КБ, под второй образ %lu КБ\n",
+         (unsigned long)(fwSize / 1024), (unsigned long)((updateEnd - sketchRounded) / 1024));
+}
+
 int main(int argc, char** argv) {
   setenv("TZ", "UTC", 1);
   tzset();
@@ -757,6 +831,7 @@ int main(int argc, char** argv) {
     if (strcmp(argv[1], "--dump-state") == 0)       out = webjson_state();
     else if (strcmp(argv[1], "--dump-config") == 0) out = webjson_config();
     else if (strcmp(argv[1], "--dump-export") == 0) out = webjson_export();
+    else if (strcmp(argv[1], "--dump-ota") == 0)    out = webjson_ota();
     printf("%s\n", out.c_str());
     return 0;
   }
@@ -771,6 +846,8 @@ int main(int argc, char** argv) {
   test_text();
   test_transfer();
   test_webjson();
+  test_otacheck();
+  test_ota_geometry();
 
   printf("\n%d проверок, ошибок: %d\n", g_checks, g_fails);
   return g_fails ? 1 : 0;

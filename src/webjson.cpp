@@ -7,6 +7,17 @@
 #include "storage.h"
 #include "netmgr.h"
 #include "text.h"
+#include "ota.h"
+#include "otacheck.h"
+
+const char* ota_state_str(uint8_t state) {
+  switch (state) {
+    case OTA_RUNNING: return "running";
+    case OTA_DONE:    return "done";
+    case OTA_ERROR:   return "error";
+    default:          return "idle";
+  }
+}
 
 const char* stop_reason_str(uint8_t reason) {
   switch (reason) {
@@ -293,5 +304,30 @@ String webjson_export() {
   }
   j += F("]}");
 
+  return j;
+}
+
+/* Состояние обновления по Wi-Fi: что показывает карточка «Обновление прошивки». */
+String webjson_ota() {
+  char errEsc[160];
+  text_json_escape(ota_error(), errEsc, sizeof(errEsc));
+
+  String j = F("{\"fw\":\"" FW_VERSION "\",\"state\":");
+  j += String((int)ota_state());
+  j += F(",\"stateText\":\"");
+  j += ota_state_str(ota_state());
+  j += F("\",\"received\":");
+  j += String((unsigned long)ota_received());
+  j += F(",\"total\":");
+  j += String((unsigned long)ota_total());
+  j += F(",\"maxSize\":");
+  j += String((unsigned long)ota_max_size());
+  j += F(",\"minSize\":");
+  j += String((unsigned long)OTA_FILE_MIN);
+  j += F(",\"freeHeap\":");
+  j += String((unsigned long)ESP.getFreeHeap());
+  j += F(",\"err\":\"");
+  j += errEsc;
+  j += F("\"}");
   return j;
 }

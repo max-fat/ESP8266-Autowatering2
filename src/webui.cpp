@@ -14,6 +14,7 @@
 #include "netmgr.h"
 #include "page_html.h"
 #include "webjson.h"
+#include "ota.h"
 
 static ESP8266WebServer s_server(80);
 
@@ -468,6 +469,53 @@ static void handle_factory_reset() {
   net_request_reboot(1200);
 }
 
+/* ---- обновление прошивки по Wi-Fi -------------------------------------
+ * ESP8266WebServer разбирает тело запроса порциями и на каждую вызывает
+ * upload()-обработчик - поэтому файл попадает во flash потоком, без буфера
+ * на 300 КБ в памяти.
+ */
+static void handle_ota_upload() {
+  HTTPUpload& up = s_server.upload();
+
+  if (up.status == UPLOAD_FILE_START) {
+    // Точный размер файла заранее неизвестен, но Content-Length всего запроса
+    // его ограничивает сверху: Updater допускает запас (запишет ровно принятое).
+    uint32_t total = 0;
+    String cl = s_server.header("Content-Length");
+    if (cl.length()) {
+      long v = cl.toInt();
+      if (v > 0) total = (uint32_t)v;
+    }
+    ota_begin(total, up.filename.c_str());
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    ota_write(up.buf, up.currentSize);
+  } else if (up.status == UPLOAD_FILE_END) {
+    ota_finish();
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    ota_abort();
+  }
+}
+
+// Вызывается после разбора тела: файл уже записан (или отклонён).
+static void handle_ota() {
+  if (ota_state() == OTA_DONE) {
+    String j = F("{\"ok\":true,\"size\":");
+    j += String((unsigned long)ota_received());
+    j += F(",\"msg\":\"прошивка принята, модуль перезагружается\"}");
+    send_json(200, j);
+    return;
+  }
+  if (ota_state() == OTA_ERROR) {
+    send_err(400, ota_error());
+    return;
+  }
+  send_err(400, "файл прошивки не получен");
+}
+
+static void handle_ota_info() {
+  send_json(200, webjson_ota());
+}
+
 static void handle_reboot() {
   send_ok();
   net_request_reboot(800);
@@ -485,6 +533,11 @@ static void handle_not_found() {
 }
 
 void webui_begin() {
+  // Обновлению прошивки нужен размер тела запроса (верхняя оценка размера файла).
+  // ESP8266WebServer по умолчанию не сохраняет заголовки — просим сохранить один.
+  static const char* otaHeaders[] = { "Content-Length" };
+  s_server.collectHeaders(otaHeaders, 1);
+
   s_server.on("/", HTTP_GET, handle_index);
   s_server.on("/index.html", HTTP_GET, handle_index);
   s_server.on("/favicon.ico", HTTP_GET, []() { s_server.send(204, "text/plain", ""); });
@@ -502,6 +555,9 @@ void webui_begin() {
   s_server.on("/api/export", HTTP_GET, handle_export);
   s_server.on("/api/import", HTTP_POST, handle_import);
   s_server.on("/api/factory", HTTP_POST, handle_factory_reset);
+  s_server.on("/api/ota", HTTP_GET, handle_ota_info);
+  // Второй обработчик - приём файла: вызывается на каждую порцию тела запроса.
+  s_server.on("/api/ota", HTTP_POST, handle_ota, handle_ota_upload);
   s_server.on("/api/reboot", HTTP_POST, handle_reboot);
 
   s_server.onNotFound(handle_not_found);
