@@ -304,16 +304,18 @@ const chSuppressUntil = [];  // до какого времени не дубли
 
 const $ = id => document.getElementById(id);
 
-/* Имя канала, заданное пользователем, или «Канал N» по умолчанию. */
+/* Подпись канала: номер всегда виден, имя (если задано) — рядом с номером.
+   «Канал 1 · Орхидеи» либо просто «Канал 1». */
 function chTitle(i){
   const n = (st && st.ch && st.ch[i] && st.ch[i].nm) ? st.ch[i].nm : '';
-  return n ? n : ('Канал ' + (i+1));
+  return n ? ('Канал ' + (i+1) + ' · ' + n) : ('Канал ' + (i+1));
 }
 
+/* То же для выпадающего списка: у безымянного канала ещё и GPIO. */
 function chOptionLabel(i){
   const n = (st && st.ch && st.ch[i] && st.ch[i].nm) ? st.ch[i].nm : '';
   const pin = (st && st.ch && st.ch[i]) ? st.ch[i].pin : '?';
-  return n ? ((i+1) + ' · ' + n) : ('Канал ' + (i+1) + ' (GPIO' + pin + ')');
+  return n ? ('Канал ' + (i+1) + ' · ' + n) : ('Канал ' + (i+1) + ' (GPIO' + pin + ')');
 }
 
 function refreshChOptions(){
@@ -729,7 +731,7 @@ function renderChannels(){
     const nmEl = $('chnm'+i);
     if(nmEl) nmEl.textContent = chTitle(i);
     const subEl = $('chsub'+i);
-    if(subEl) subEl.textContent = (c.nm ? ('Канал ' + (i+1) + ' · ') : '') + 'GPIO' + c.pin;
+    if(subEl) subEl.textContent = 'GPIO' + c.pin;
     card.classList.toggle('on', !!c.on);
     const pill = $('chp'+i);
     pill.className = 'pill ' + (c.on ? 'running' : 'off');
