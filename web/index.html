@@ -221,9 +221,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <div class="card">
       <h2>Помпы</h2>
       <div class="grid" id="pumpSettings"></div>
-      <p class="hint">Имя канала — это то, что он поливает: «Орхидеи», «Томаты», «Газон». Оно видно на
-        вкладке «Каналы», в задачах и в уведомлениях, поэтому при нескольких модулях сразу понятно,
-        какой канал за что отвечает. Пустое имя = «Канал N».</p>
+      <p class="hint">Имя канала — это то, что он поливает: «Орхидеи», «Томаты», «Газон». Имя
+        <b>сохраняется сразу после ввода</b> (и видно в шапке канала на вкладке «Каналы», в задачах и
+        в уведомлениях), пины же применяются кнопкой «Сохранить настройки». Пустое имя = «Канал N».</p>
       <p class="hint">По умолчанию выбраны пины, которые при включении питания находятся в низком уровне
         (GPIO4, GPIO5, GPIO12, GPIO14). «Инверсия» включает помпу низким уровнем — так работают многие
         модули реле.</p>
@@ -819,6 +819,8 @@ $('btnName').addEventListener('click', async ()=>{
   }catch(e){ toast(errText(e), true); }
 });
 
+$('s_name').addEventListener('change', ()=> $('btnName').click());
+
 $('btnPhoneTime').addEventListener('click', ()=> sendPhoneTime(false));
 $('btnPhoneTimeTz').addEventListener('click', ()=> sendPhoneTime(true));
 
@@ -878,6 +880,25 @@ $('btnExport').addEventListener('click', async ()=>{
     saveBlob(text, name + '-' + stamp + '.json');
     toast('Файл настроек сохранён');
   }catch(e){ toast('Не удалось выгрузить настройки', true); }
+});
+
+/* Имена каналов сохраняются сразу (по change/blur), отдельной кнопки не нужно:
+   раньше имя терялось, если не нажать «Сохранить настройки» в другой карточке. */
+async function saveChannelName(i, value){
+  try{
+    await post('/api/config', {['ch'+i+'_name']: value});
+    const v = (value || '').trim();
+    toast(v ? ('Канал ' + (i+1) + ': ' + v) : ('Канал ' + (i+1) + ': имя очищено'));
+    await load();
+  }catch(e){ toast(errText(e), true); }
+}
+
+$('pumpSettings').addEventListener('change', (ev)=>{
+  const el = ev.target;
+  if(!el || !el.id) return;
+  const m = /^s_chname(\d+)$/.exec(el.id);
+  if(!m) return;
+  saveChannelName(parseInt(m[1], 10), el.value);
 });
 
 $('btnImport').addEventListener('click', ()=> $('importFile').click());

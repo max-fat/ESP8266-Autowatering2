@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 #define FW_NAME     "ESP8266-Autowatering2"
-#define FW_VERSION  "1.5.1"
+#define FW_VERSION  "1.5.2"
 
 /* ---------- Ограничения ---------- */
 #define NUM_CHANNELS      4       // число помп (каналов)
