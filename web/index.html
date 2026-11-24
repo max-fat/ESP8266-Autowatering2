@@ -267,6 +267,23 @@ button:disabled{opacity:.45;cursor:not-allowed}
     </div>
 
     <div class="card">
+      <h2>Резервная копия</h2>
+      <p class="hint" style="margin-top:0">Настройки и задачи можно сохранить в файл и загрузить в другой
+        модуль — например, чтобы у двух контроллеров было одинаковое расписание. Wi-Fi (сеть и пароль)
+        в файл не попадает: после импорта на новом модуле сеть нужно указать отдельно.</p>
+      <div class="actions" style="padding-top:0">
+        <button class="blue" id="btnExport">Скачать файл настроек</button>
+        <button class="blue" id="btnImport">Загрузить из файла</button>
+        <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+      </div>
+      <label class="chk" style="padding-top:6px"><input type="checkbox" id="impStatus" checked>
+        Переносить статус задач (последний и следующий полив)</label>
+      <p class="hint">Если галочка снята, после импорта расписание начнётся заново от текущего времени
+        — так удобнее клонировать настройки на второй модуль. Текущие настройки и задачи при импорте
+        заменяются полностью.</p>
+    </div>
+
+    <div class="card">
       <h2>Опасная зона</h2>
       <div class="actions" style="padding-top:0">
         <button class="blue" id="btnReboot">Перезагрузить</button>
@@ -344,7 +361,12 @@ function errText(e){
     pin_conflict_sensor:'Пин датчика совпадает с пином помпы',
     bad_channel_pin:'Недопустимый пин помпы (нельзя GPIO6…GPIO11)',
     bad_sensor_pin:'Недопустимый пин датчика',
-    empty_ssid:'Укажите имя сети'
+    empty_ssid:'Укажите имя сети',
+    bad_task:'Некорректная задача в файле (проверьте длительность и период)',
+    bad_channel_pin:'В файле недопустимый пин помпы',
+    bad_sensor_pin:'В файле недопустимый пин датчика',
+    pin_conflict:'В файле пины помп совпадают',
+    pin_conflict_sensor:'В файле пин датчика совпадает с пином помпы'
   };
   return map[e.message] || ('Ошибка: ' + e.message);
 }
@@ -805,6 +827,119 @@ $('btnWifi').addEventListener('click', async ()=>{
   try{
     await post('/api/wifi', {ssid, pass});
     toast('Сохранено, перезагрузка…');
+  }catch(e){ toast(errText(e), true); }
+});
+
+/* ---------- резервная копия: экспорт и импорт ---------- */
+
+/* Чтение выбранного файла (FileReader работает и в старых WebView). */
+function readTextFile(file){
+  return new Promise((resolve, reject)=>{
+    const fr = new FileReader();
+    fr.onload = ()=> resolve(String(fr.result || ''));
+    fr.onerror = ()=> reject(fr.error || new Error('read_error'));
+    fr.readAsText(file);
+  });
+}
+
+function saveBlob(text, filename){
+  try{
+    const blob = new Blob([text], {type:'application/json'});
+    if(!window.URL || !URL.createObjectURL) throw new Error('no_blob');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 2000);
+  }catch(e){
+    // очень старый браузер: открываем JSON в новой вкладке
+    window.open('/api/export', '_blank');
+  }
+}
+
+$('btnExport').addEventListener('click', async ()=>{
+  try{
+    const r = await fetch('/api/export', {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const text = await r.text();
+    let name = 'autowatering';
+    try{
+      const j = JSON.parse(text);
+      const nm = ((j.cfg && j.cfg.name) || '').trim();
+      if(nm) name = 'autowatering-' + nm.replace(/[^0-9A-Za-zА-Яа-яЁё_-]+/g, '_');
+    }catch(e){}
+    const d = new Date();
+    const stamp = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    saveBlob(text, name + '-' + stamp + '.json');
+    toast('Файл настроек сохранён');
+  }catch(e){ toast('Не удалось выгрузить настройки', true); }
+});
+
+$('btnImport').addEventListener('click', ()=> $('importFile').click());
+
+$('importFile').addEventListener('change', async (ev)=>{
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';                    // чтобы можно было выбрать тот же файл снова
+  if(!file) return;
+
+  let data = null;
+  try{
+    data = JSON.parse(await readTextFile(file));
+  }catch(e){
+    toast('Файл не является корректным JSON', true);
+    return;
+  }
+  const cfg = data && data.cfg;
+  if(!cfg || !Array.isArray(cfg.ch) || (data.tasks && !Array.isArray(data.tasks))){
+    toast('Это не файл настроек автополива', true);
+    return;
+  }
+  const tasks = data.tasks || [];
+  const what = 'Импортировать настройки' + (cfg.name ? (' модуля «' + cfg.name + '»') : '') +
+    ' и задач: ' + tasks.length + '? Текущие настройки и задачи будут заменены.';
+  if(!confirm(what)) return;
+
+  const withStatus = $('impStatus').checked;
+  const body = {
+    name: cfg.name || '',
+    tz: parseInt(cfg.tz, 10) || 0,
+    ntp: cfg.ntp || 'pool.ntp.org',
+    sensorPin: parseInt(cfg.sensorPin, 10),
+    sensorInv: cfg.sensorInv ? 1 : 0,
+    sensorPull: cfg.sensorPull ? 1 : 0,
+    blockLow: cfg.blockLow ? 1 : 0,
+    maxRun: parseInt(cfg.maxRun, 10) || 600,
+    catchup: parseInt(cfg.catchup, 10) || 0,
+    status: withStatus ? 1 : 0
+  };
+  for(let i=0;i<cfg.ch.length && i<st.limits.channels;i++){
+    const c = cfg.ch[i] || {};
+    body['ch'+i+'_pin'] = parseInt(c.pin, 10);
+    body['ch'+i+'_inv'] = c.inv ? 1 : 0;
+    body['ch'+i+'_name'] = c.name || '';
+  }
+  for(let i=0;i<tasks.length && i<st.limits.maxTasks;i++){
+    const t = tasks[i] || {};
+    body['t'+i] = [
+      parseInt(t.ch, 10) || 0,
+      parseInt(t.h, 10) || 0,
+      parseInt(t.m, 10) || 0,
+      parseInt(t.dur, 10) || 1,
+      parseInt(t.pd, 10) || 1,
+      t.en ? 1 : 0,
+      withStatus ? (parseInt(t.last, 10) || 0) : 0,
+      withStatus ? (parseInt(t.next, 10) || 0) : 0
+    ].join(',');
+  }
+
+  try{
+    const r = await post('/api/import', body);
+    cfgLoaded = false;                     // перечитаем настройки с устройства
+    toast('Импортировано: задач ' + (r.tasks || 0) + ', каналов ' + (r.channels || 0));
+    await load();
   }catch(e){ toast(errText(e), true); }
 });
 

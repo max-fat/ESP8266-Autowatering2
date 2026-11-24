@@ -63,6 +63,7 @@
 | `src/clock.h/.cpp` | Время: NTP/телефон, UTC + смещение пояса, «локальные секунды эпохи», форматирование строк для UI, арифметика суток |
 | `src/netmgr.h/.cpp` | Состояния Wi-Fi (`BOOT/STA/AP/AP_STA`), captive portal (DNSServer), NTP (`configTime(0,0,...)` — всегда UTC), отложенная перезагрузка, асинхронное сканирование сетей (`net_scan_start/net_scan_state/net_scan_results`) |
 | `src/text.h/.cpp` | Пользовательские строки: `text_set` (обрезка по границе UTF-8, срез пробелов, защита от битых байтов), `text_json_escape`, `text_utf8_len`. Покрыт host-тестами |
+| `src/transfer.h/.cpp` | Обмен настройками/задачами: `transfer_task_encode/decode` — задача одной строкой `ch,h,m,dur,pd,en,last,next` (без JSON-парсера на устройстве), проверка диапазонов. Покрыт host-тестами |
 | `src/scanlist.h/.cpp` | Чистая логика списка сетей: отбросить скрытые, склеить дубликаты SSID, отсортировать по сигналу, обрезать до лимита, JSON-экранирование. Покрыта host-тестами |
 | `src/webui.h/.cpp` | HTTP-сервер, REST API, сборка JSON вручную, отдача gzip-страницы |
 | `src/page_html.h` | **Генерируется** из `web/index.html` — не редактировать руками |
@@ -136,6 +137,15 @@
 `GET /api/state`, `GET /api/config`,
 `POST /api/task` (`id=-1` для новой), `POST /api/task/del`, `POST /api/task/run`,
 `POST /api/ch` (`ch`, `sec`; `sec=0` — стоп),
+`GET /api/export` — настройки, имена каналов и задачи одним JSON (без Wi-Fi),
+`POST /api/import` — импорт: те же поля, что у `POST /api/config`, плюс
+`t0…t7` (задача строкой `ch,h,m,dur,pd,en,last,next`) и `status=1` (переносить
+`lastRun`/`nextDue`). **JSON разбирает браузер**, устройство принимает уже
+плоскую форму — не добавляйте JSON-парсер на ESP8266, `transfer_task_decode()`
+специально сделан без выделения памяти. Импорт проверяет всё до применения:
+при ошибке конфигурация остаётся прежней (не повторяйте `POST /api/config` +
+`POST /api/task` по одному — это даёт полуимпортированное состояние).
+
 `GET /api/scan` (`start=1` — начать поиск; ответ `running` / `done` / `idle`,
 `nets[] = {ssid, rssi, enc}`; сканирование **асинхронное** — `WiFi.scanNetworks(true, true)`
 и опрос `WiFi.scanComplete()`, иначе блокирующий скан рвёт страницу в режиме точки доступа),

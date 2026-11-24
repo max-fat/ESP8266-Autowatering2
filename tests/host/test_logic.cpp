@@ -18,6 +18,7 @@
 #include "../../src/scheduler.h"
 #include "../../src/storage.h"
 #include "../../src/text.h"
+#include "../../src/transfer.h"
 
 // --- заглушки, которые ждут модули прошивки ---
 uint32_t g_millis = 0;
@@ -577,6 +578,80 @@ static void test_text() {
   CHECK_EQ(text_utf8_len(""), 0);
 }
 
+/* ---------------- обмен настройками и задачами ---------------- */
+static void test_transfer() {
+  printf("[transfer]\n");
+
+  TaskCfg t;
+  memset(&t, 0, sizeof(t));
+  t.used = 1;
+  t.enabled = 1;
+  t.channel = 2;
+  t.hour = 19;
+  t.minute = 30;
+  t.durationSec = 60;
+  t.periodDays = 2;
+  t.lastRun = 1795000000UL;
+  t.nextDue = 1795170000UL;
+
+  // 1. кодирование
+  char buf[64];
+  CHECK(transfer_task_encode(t, buf, sizeof(buf)) == true);
+  CHECK(strcmp(buf, "2,19,30,60,2,1,1795000000,1795170000") == 0);
+
+  // 2. обратный разбор: все поля на месте
+  TaskCfg d;
+  memset(&d, 0, sizeof(d));
+  CHECK(transfer_task_decode(buf, &d) == true);
+  CHECK_EQ(d.used, 1);
+  CHECK_EQ(d.channel, 2);
+  CHECK_EQ(d.hour, 19);
+  CHECK_EQ(d.minute, 30);
+  CHECK_EQ(d.durationSec, 60);
+  CHECK_EQ(d.periodDays, 2);
+  CHECK_EQ(d.enabled, 1);
+  CHECK_EQ(d.lastRun, 1795000000L);
+  CHECK_EQ(d.nextDue, 1795170000L);
+
+  // 3. выключенная задача: en = 0
+  t.enabled = 0;
+  CHECK(transfer_task_encode(t, buf, sizeof(buf)) == true);
+  CHECK(transfer_task_decode(buf, &d) == true);
+  CHECK_EQ(d.enabled, 0);
+
+  // 4. пробелы вокруг чисел допустимы
+  CHECK(transfer_task_decode(" 0 , 8 , 0 , 30 , 1 , 1 , 0 , 0 ", &d) == true);
+  CHECK_EQ(d.hour, 8);
+
+  // 5. битые строки отвергаются
+  CHECK(transfer_task_decode("", &d) == false);
+  CHECK(transfer_task_decode("1,2,3", &d) == false);
+  CHECK(transfer_task_decode("1,2,3,4,5,6,7,8,9", &d) == false);
+  CHECK(transfer_task_decode("a,b,c,d,e,f,g,h", &d) == false);
+  CHECK(transfer_task_decode("0,0,0,10,1,1,0", &d) == false);       // мало полей
+  CHECK(transfer_task_decode("0,0,,10,1,1,0,0", &d) == false);      // пустое поле
+
+  // 6. проверка диапазонов
+  CHECK(transfer_task_decode("9,0,0,10,1,1,0,0", &d) == false);     // канал
+  CHECK(transfer_task_decode("0,24,0,10,1,1,0,0", &d) == false);    // часы
+  CHECK(transfer_task_decode("0,0,60,10,1,1,0,0", &d) == false);    // минуты
+  CHECK(transfer_task_decode("0,0,0,0,1,1,0,0", &d) == false);      // длительность 0
+  CHECK(transfer_task_decode("0,0,0,10,0,1,0,0", &d) == false);     // период 0
+  CHECK(transfer_task_decode("0,0,0,10,61,1,0,0", &d) == false);    // период > 60
+  CHECK(transfer_task_decode("0,0,0,10,1,2,0,0", &d) == false);     // флаг активности
+  CHECK(transfer_task_decode("0,0,0,10,1,1,-1,0", &d) == false);    // отрицательное
+
+  // 7. при ошибке структура не меняется
+  memset(&d, 0, sizeof(d));
+  CHECK(transfer_task_decode("bad", &d) == false);
+  CHECK_EQ(d.used, 0);
+
+  // 8. слишком маленький буфер при кодировании
+  t.enabled = 1;
+  char small[10];
+  CHECK(transfer_task_encode(t, small, sizeof(small)) == false);
+}
+
 int main() {
   setenv("TZ", "UTC", 1);
   tzset();
@@ -589,6 +664,7 @@ int main() {
   test_stop_events();
   test_scanlist();
   test_text();
+  test_transfer();
 
   printf("\n%d проверок, ошибок: %d\n", g_checks, g_fails);
   return g_fails ? 1 : 0;
