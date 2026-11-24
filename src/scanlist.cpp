@@ -1,6 +1,5 @@
 #include "scanlist.h"
 
-#include <stdio.h>
 #include <string.h>
 
 static int find_ssid(const ScanNet* list, uint8_t count, const char* ssid) {
@@ -61,45 +60,4 @@ uint8_t scanlist_build(const ScanNet* in, uint8_t count, ScanNet* out, uint8_t m
   }
 
   return n;
-}
-
-void scanlist_json_escape(const char* in, char* out, size_t outSize) {
-  if (!out || outSize == 0) return;
-  size_t o = 0;
-  if (!in) {
-    out[0] = '\0';
-    return;
-  }
-
-  for (const char* p = in; *p; p++) {
-    unsigned char c = (unsigned char)*p;
-    char buf[8];
-    const char* rep = NULL;
-
-    switch (c) {
-      case '"':  rep = "\\\""; break;
-      case '\\': rep = "\\\\"; break;
-      case '\n': rep = "\\n";  break;
-      case '\r': rep = "\\r";  break;
-      case '\t': rep = "\\t";  break;
-      default:
-        if (c < 0x20) {
-          snprintf(buf, sizeof(buf), "\\u%04x", (unsigned)c);
-          rep = buf;
-        }
-        break;
-    }
-
-    if (rep) {
-      size_t len = strlen(rep);
-      if (o + len + 1 > outSize) break;
-      memcpy(out + o, rep, len);
-      o += len;
-    } else {
-      if (o + 2 > outSize) break;
-      out[o++] = (char)c;
-    }
-  }
-
-  out[o] = '\0';
 }

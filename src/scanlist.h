@@ -32,10 +32,3 @@ struct ScanNet {
  * Возвращает количество записей в out.
  */
 uint8_t scanlist_build(const ScanNet* in, uint8_t count, ScanNet* out, uint8_t maxOut);
-
-/*
- * Экранировать строку для JSON (кавычки, обратный слэш, управляющие символы).
- * Байты >= 0x20 копируются как есть. Результат всегда завершён нулём;
- * при нехватке места строка обрезается.
- */
-void scanlist_json_escape(const char* in, char* out, size_t outSize);

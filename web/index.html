@@ -125,7 +125,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
 <header>
   <div>
-    <div class="brand"><span class="dot"></span> Автополив</div>
+    <div class="brand"><span class="dot"></span> <span id="brandName">Автополив</span></div>
     <div class="sub" id="wifiLine">подключение…</div>
   </div>
   <div class="hright">
@@ -184,6 +184,20 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <!-- ================= НАСТРОЙКИ ================= -->
   <section id="tab-settings">
     <div class="card">
+      <h2>Модуль</h2>
+      <div class="grid">
+        <label>Имя модуля<input id="s_name" maxlength="32" placeholder="Например: Теплица"></label>
+      </div>
+      <div class="actions">
+        <button class="primary" id="btnName">Сохранить имя</button>
+      </div>
+      <p class="hint">Имя видно в шапке страницы и в заголовке вкладки браузера — удобно, когда
+        модулей несколько. Оно же попадает в имя точки доступа настройки: вместо
+        <code>AutoWater-XXXXXX</code> будет <code>Имя-XXXXXX</code> (применяется после перезагрузки).
+        Если имя не задано, показывается «Автополив».</p>
+    </div>
+
+    <div class="card">
       <h2>Wi-Fi</h2>
       <div class="grid">
         <div>
@@ -207,6 +221,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <div class="card">
       <h2>Помпы</h2>
       <div class="grid" id="pumpSettings"></div>
+      <p class="hint">Имя канала — это то, что он поливает: «Орхидеи», «Томаты», «Газон». Оно видно на
+        вкладке «Каналы», в задачах и в уведомлениях, поэтому при нескольких модулях сразу понятно,
+        какой канал за что отвечает. Пустое имя = «Канал N».</p>
       <p class="hint">По умолчанию выбраны пины, которые при включении питания находятся в низком уровне
         (GPIO4, GPIO5, GPIO12, GPIO14). «Инверсия» включает помпу низким уровнем — так работают многие
         модули реле.</p>
@@ -250,6 +267,23 @@ button:disabled{opacity:.45;cursor:not-allowed}
     </div>
 
     <div class="card">
+      <h2>Резервная копия</h2>
+      <p class="hint" style="margin-top:0">Настройки и задачи можно сохранить в файл и загрузить в другой
+        модуль — например, чтобы у двух контроллеров было одинаковое расписание. Wi-Fi (сеть и пароль)
+        в файл не попадает: после импорта на новом модуле сеть нужно указать отдельно.</p>
+      <div class="actions" style="padding-top:0">
+        <button class="blue" id="btnExport">Скачать файл настроек</button>
+        <button class="blue" id="btnImport">Загрузить из файла</button>
+        <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+      </div>
+      <label class="chk" style="padding-top:6px"><input type="checkbox" id="impStatus" checked>
+        Переносить статус задач (последний и следующий полив)</label>
+      <p class="hint">Если галочка снята, после импорта расписание начнётся заново от текущего времени
+        — так удобнее клонировать настройки на второй модуль. Текущие настройки и задачи при импорте
+        заменяются полностью.</p>
+    </div>
+
+    <div class="card">
       <h2>Опасная зона</h2>
       <div class="actions" style="padding-top:0">
         <button class="blue" id="btnReboot">Перезагрузить</button>
@@ -269,6 +303,29 @@ const chStopSeq = [];        // последний увиденный seq вык
 const chSuppressUntil = [];  // до какого времени не дублировать уведомление
 
 const $ = id => document.getElementById(id);
+
+/* Имя канала, заданное пользователем, или «Канал N» по умолчанию. */
+function chTitle(i){
+  const n = (st && st.ch && st.ch[i] && st.ch[i].nm) ? st.ch[i].nm : '';
+  return n ? n : ('Канал ' + (i+1));
+}
+
+function chOptionLabel(i){
+  const n = (st && st.ch && st.ch[i] && st.ch[i].nm) ? st.ch[i].nm : '';
+  const pin = (st && st.ch && st.ch[i]) ? st.ch[i].pin : '?';
+  return n ? ((i+1) + ' · ' + n) : ('Канал ' + (i+1) + ' (GPIO' + pin + ')');
+}
+
+function refreshChOptions(){
+  const sel = $('t_ch');
+  if(!sel || !sel.options.length) return;
+  const cur = sel.value;
+  for(const o of sel.options){
+    const i = parseInt(o.value, 10);
+    if(!isNaN(i)) o.textContent = chOptionLabel(i);
+  }
+  sel.value = cur;
+}
 
 function toast(msg, isErr){
   const t = $('toast');
@@ -304,7 +361,12 @@ function errText(e){
     pin_conflict_sensor:'Пин датчика совпадает с пином помпы',
     bad_channel_pin:'Недопустимый пин помпы (нельзя GPIO6…GPIO11)',
     bad_sensor_pin:'Недопустимый пин датчика',
-    empty_ssid:'Укажите имя сети'
+    empty_ssid:'Укажите имя сети',
+    bad_task:'Некорректная задача в файле (проверьте длительность и период)',
+    bad_channel_pin:'В файле недопустимый пин помпы',
+    bad_sensor_pin:'В файле недопустимый пин датчика',
+    pin_conflict:'В файле пины помп совпадают',
+    pin_conflict_sensor:'В файле пин датчика совпадает с пином помпы'
   };
   return map[e.message] || ('Ошибка: ' + e.message);
 }
@@ -463,6 +525,11 @@ function selectTab(name){
 
 /* ---------- шапка ---------- */
 function renderHeader(){
+  const custom = (st.name || '').trim();
+  const modName = custom || 'Автополив';
+  $('brandName').textContent = modName;
+  const title = custom ? (modName + ' — Автополив') : 'Автополив';
+  if(document.title !== title) document.title = title;
   $('clock').textContent = st.time;
   $('date').textContent = st.date;
   const wb = $('waterBadge');
@@ -517,7 +584,7 @@ function renderTasks(){
   }
   let html = '';
   for(const t of st.tasks){
-    const chName = 'Канал ' + (t.ch+1) + ' (GPIO' + st.ch[t.ch].pin + ')';
+    const chName = chTitle(t.ch);
     html += '<div class="task">' +
       '<div class="top"><div>' +
         '<div class="title">' + chName + ' · ' + String(t.h).padStart(2,'0') + ':' + String(t.m).padStart(2,'0') + '</div>' +
@@ -599,8 +666,9 @@ function buildChannels(){
   let html = '';
   for(let i=0;i<st.limits.channels;i++){
     html += '<div class="ch" id="ch' + i + '">' +
-      '<div class="name"><span>Канал ' + (i+1) + '</span><span class="pill off" id="chp' + i + '">выкл</span></div>' +
-      '<div class="state">GPIO' + st.ch[i].pin + ' <span id="chs' + i + '"></span></div>' +
+      '<div class="name"><span class="chnm" id="chnm' + i + '"></span>' +
+      '<span class="pill off" id="chp' + i + '">выкл</span></div>' +
+      '<div class="state"><span id="chsub' + i + '"></span> <span id="chs' + i + '"></span></div>' +
       '<div class="row"><input type="number" id="chsec' + i + '" min="1" max="' + st.limits.maxRun + '" value="30">' +
       '<button class="small primary" data-ch="' + i + '" data-sec="1">▶</button></div>' +
       '<div class="row" style="margin-top:8px"><button class="small" data-ch="' + i + '" data-sec="0">Стоп</button></div>' +
@@ -615,11 +683,11 @@ function buildChannels(){
       try{
         await post('/api/ch', {ch:i, sec});
         if(run){
-          toast('Канал ' + (i+1) + ' включён на ' + sec + ' с');
+          toast(chTitle(i) + ': включён на ' + sec + ' с');
         } else {
           // сразу даём обратную связь, а событие с устройства (≤2 с) не дублируем
           chSuppressUntil[i] = Date.now() + 5000;
-          toast('Канал ' + (i+1) + ' остановлен');
+          toast(chTitle(i) + ': остановлен');
         }
         await load();
       }catch(e){ toast(errText(e), true); }
@@ -631,7 +699,7 @@ function buildChannels(){
 /* Уведомление о выключении канала: устройство сообщает причину
    (timer - истекло время, manual - остановили вручную, low - низкий уровень воды). */
 function notifyChannelStopped(i, rsn, run){
-  const name = 'Канал ' + (i+1);
+  const name = chTitle(i);
   if(rsn === 'timer'){
     toast(name + ': полив завершён' + (run ? ' (' + run + ' с)' : ''));
   } else if(rsn === 'low'){
@@ -658,6 +726,10 @@ function renderChannels(){
 
     const card = $('ch'+i);
     if(!card) continue;
+    const nmEl = $('chnm'+i);
+    if(nmEl) nmEl.textContent = chTitle(i);
+    const subEl = $('chsub'+i);
+    if(subEl) subEl.textContent = (c.nm ? ('Канал ' + (i+1) + ' · ') : '') + 'GPIO' + c.pin;
     card.classList.toggle('on', !!c.on);
     const pill = $('chp'+i);
     pill.className = 'pill ' + (c.on ? 'running' : 'off');
@@ -675,6 +747,7 @@ function renderChannels(){
 async function loadConfig(){
   try{
     const c = await getJson('/api/config');
+    $('s_name').value = c.name || '';
     $('s_ssid').value = c.ssid || '';
     $('s_ntp').value = c.ntp || 'pool.ntp.org';
     buildTzOptions();
@@ -698,6 +771,8 @@ async function loadConfig(){
     for(let i=0;i<c.ch.length;i++){
       html += '<div><label>Канал ' + (i+1) + ', GPIO<input type="number" id="s_chpin' + i +
         '" min="0" max="16" value="' + c.ch[i].pin + '"></label>' +
+        '<label>Что поливает (имя канала)<input id="s_chname' + i + '" maxlength="32" value="' +
+        escHtml(c.ch[i].name || '') + '" placeholder="Например: Орхидеи"></label>' +
         '<label class="chk"><input type="checkbox" id="s_chinv' + i + '"' + (c.ch[i].inv ? ' checked' : '') +
         '> Инверсия (вкл. низким)</label></div>';
     }
@@ -720,6 +795,7 @@ $('btnCfg').addEventListener('click', async ()=>{
   for(let i=0;i<st.limits.channels;i++){
     data['ch'+i+'_pin'] = parseInt($('s_chpin'+i).value,10);
     data['ch'+i+'_inv'] = $('s_chinv'+i).checked;
+    data['ch'+i+'_name'] = $('s_chname'+i).value;
   }
   try{
     await post('/api/config', data);
@@ -729,6 +805,17 @@ $('btnCfg').addEventListener('click', async ()=>{
 });
 
 $('btnScan').addEventListener('click', startScan);
+
+/* Имя модуля сохраняется отдельной кнопкой: оно не влияет на полив и его
+   не нужно перепроверять вместе с пинами. */
+$('btnName').addEventListener('click', async ()=>{
+  try{
+    const r = await post('/api/config', {name: $('s_name').value});
+    const nm = $('s_name').value.trim();
+    toast(nm ? ('Имя модуля: ' + nm) : 'Имя модуля сброшено');
+    await load();
+  }catch(e){ toast(errText(e), true); }
+});
 
 $('btnPhoneTime').addEventListener('click', ()=> sendPhoneTime(false));
 $('btnPhoneTimeTz').addEventListener('click', ()=> sendPhoneTime(true));
@@ -740,6 +827,119 @@ $('btnWifi').addEventListener('click', async ()=>{
   try{
     await post('/api/wifi', {ssid, pass});
     toast('Сохранено, перезагрузка…');
+  }catch(e){ toast(errText(e), true); }
+});
+
+/* ---------- резервная копия: экспорт и импорт ---------- */
+
+/* Чтение выбранного файла (FileReader работает и в старых WebView). */
+function readTextFile(file){
+  return new Promise((resolve, reject)=>{
+    const fr = new FileReader();
+    fr.onload = ()=> resolve(String(fr.result || ''));
+    fr.onerror = ()=> reject(fr.error || new Error('read_error'));
+    fr.readAsText(file);
+  });
+}
+
+function saveBlob(text, filename){
+  try{
+    const blob = new Blob([text], {type:'application/json'});
+    if(!window.URL || !URL.createObjectURL) throw new Error('no_blob');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 2000);
+  }catch(e){
+    // очень старый браузер: открываем JSON в новой вкладке
+    window.open('/api/export', '_blank');
+  }
+}
+
+$('btnExport').addEventListener('click', async ()=>{
+  try{
+    const r = await fetch('/api/export', {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const text = await r.text();
+    let name = 'autowatering';
+    try{
+      const j = JSON.parse(text);
+      const nm = ((j.cfg && j.cfg.name) || '').trim();
+      if(nm) name = 'autowatering-' + nm.replace(/[^0-9A-Za-zА-Яа-яЁё_-]+/g, '_');
+    }catch(e){}
+    const d = new Date();
+    const stamp = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    saveBlob(text, name + '-' + stamp + '.json');
+    toast('Файл настроек сохранён');
+  }catch(e){ toast('Не удалось выгрузить настройки', true); }
+});
+
+$('btnImport').addEventListener('click', ()=> $('importFile').click());
+
+$('importFile').addEventListener('change', async (ev)=>{
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';                    // чтобы можно было выбрать тот же файл снова
+  if(!file) return;
+
+  let data = null;
+  try{
+    data = JSON.parse(await readTextFile(file));
+  }catch(e){
+    toast('Файл не является корректным JSON', true);
+    return;
+  }
+  const cfg = data && data.cfg;
+  if(!cfg || !Array.isArray(cfg.ch) || (data.tasks && !Array.isArray(data.tasks))){
+    toast('Это не файл настроек автополива', true);
+    return;
+  }
+  const tasks = data.tasks || [];
+  const what = 'Импортировать настройки' + (cfg.name ? (' модуля «' + cfg.name + '»') : '') +
+    ' и задач: ' + tasks.length + '? Текущие настройки и задачи будут заменены.';
+  if(!confirm(what)) return;
+
+  const withStatus = $('impStatus').checked;
+  const body = {
+    name: cfg.name || '',
+    tz: parseInt(cfg.tz, 10) || 0,
+    ntp: cfg.ntp || 'pool.ntp.org',
+    sensorPin: parseInt(cfg.sensorPin, 10),
+    sensorInv: cfg.sensorInv ? 1 : 0,
+    sensorPull: cfg.sensorPull ? 1 : 0,
+    blockLow: cfg.blockLow ? 1 : 0,
+    maxRun: parseInt(cfg.maxRun, 10) || 600,
+    catchup: parseInt(cfg.catchup, 10) || 0,
+    status: withStatus ? 1 : 0
+  };
+  for(let i=0;i<cfg.ch.length && i<st.limits.channels;i++){
+    const c = cfg.ch[i] || {};
+    body['ch'+i+'_pin'] = parseInt(c.pin, 10);
+    body['ch'+i+'_inv'] = c.inv ? 1 : 0;
+    body['ch'+i+'_name'] = c.name || '';
+  }
+  for(let i=0;i<tasks.length && i<st.limits.maxTasks;i++){
+    const t = tasks[i] || {};
+    body['t'+i] = [
+      parseInt(t.ch, 10) || 0,
+      parseInt(t.h, 10) || 0,
+      parseInt(t.m, 10) || 0,
+      parseInt(t.dur, 10) || 1,
+      parseInt(t.pd, 10) || 1,
+      t.en ? 1 : 0,
+      withStatus ? (parseInt(t.last, 10) || 0) : 0,
+      withStatus ? (parseInt(t.next, 10) || 0) : 0
+    ].join(',');
+  }
+
+  try{
+    const r = await post('/api/import', body);
+    cfgLoaded = false;                     // перечитаем настройки с устройства
+    toast('Импортировано: задач ' + (r.tasks || 0) + ', каналов ' + (r.channels || 0));
+    await load();
   }catch(e){ toast(errText(e), true); }
 });
 
@@ -755,7 +955,8 @@ $('btnFactory').addEventListener('click', async ()=>{
 
 function renderInfo(){
   $('infoBox').innerHTML =
-    '<div>Прошивка</div><div>' + st.name + ' ' + st.fw + '</div>' +
+    '<div>Имя модуля</div><div>' + escHtml((st.name || '').trim() || 'не задано (Автополив)') + '</div>' +
+    '<div>Прошивка</div><div>' + st.appName + ' ' + st.fw + '</div>' +
     '<div>Режим Wi-Fi</div><div>' + st.wifi.mode + '</div>' +
     '<div>IP</div><div>' + (st.wifi.connected ? st.wifi.ip : '—') + '</div>' +
     '<div>Точка доступа</div><div>' + (st.wifi.apActive ? st.wifi.apSsid + ' / ' + st.wifi.apIp : 'выключена') + '</div>' +
@@ -787,6 +988,7 @@ async function load(){
   renderTasks();
   renderChannels();
   renderInfo();
+  refreshChOptions();
 
   if(!st.wifi.configured && !window._autoSetup){
     window._autoSetup = true;

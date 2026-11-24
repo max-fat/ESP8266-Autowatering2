@@ -9,6 +9,8 @@
 #include "clock.h"
 #include "scheduler.h"
 #include "storage.h"
+#include "text.h"
+#include "transfer.h"
 #include "netmgr.h"
 #include "page_html.h"
 
@@ -78,7 +80,12 @@ static String build_state_json() {
   char dateBuf[16];
   clock_now_strings(timeBuf, sizeof(timeBuf), dateBuf, sizeof(dateBuf));
 
-  j += F("{\"fw\":\"" FW_VERSION "\",\"name\":\"" FW_NAME "\",");
+  char nameEsc[MODULE_NAME_MAX * 6 + 1];
+  text_json_escape(g_store.cfg.name, nameEsc, sizeof(nameEsc));
+
+  j += F("{\"fw\":\"" FW_VERSION "\",\"appName\":\"" FW_NAME "\",\"name\":\"");
+  j += nameEsc;                 // имя модуля ("" = не задано, UI покажет "Автополив")
+  j += F("\",");
   // Время отдаём строками, посчитанными на устройстве: браузер не должен
   // пересчитывать его в свой часовой пояс.
   j += F("\"now\":");
@@ -212,7 +219,11 @@ static String build_state_json() {
 static String build_config_json() {
   String j;
   j.reserve(700);
-  j += F("{\"ssid\":\"");
+  char nameEsc[MODULE_NAME_MAX * 6 + 1];
+  text_json_escape(g_store.cfg.name, nameEsc, sizeof(nameEsc));
+  j += F("{\"name\":\"");
+  j += nameEsc;
+  j += F("\",\"ssid\":\"");
   j += g_store.cfg.ssid;
   j += F("\",\"hasPass\":");
   j += g_store.cfg.pass[0] ? '1' : '0';
@@ -239,7 +250,11 @@ static String build_config_json() {
     j += String((int)g_store.cfg.ch[i].pin);
     j += F(",\"inv\":");
     j += String((int)g_store.cfg.ch[i].activeLow);
-    j += '}';
+    char nmEsc[CHANNEL_NAME_MAX * 6 + 1];
+    text_json_escape(g_store.cfg.ch[i].name, nmEsc, sizeof(nmEsc));
+    j += F(",\"name\":\"");
+    j += nmEsc;
+    j += F("\"}");
   }
   j += F("]}");
   return j;
@@ -361,9 +376,7 @@ static void handle_channel() {
   send_ok();
 }
 
-static void handle_config_save() {
-  Settings& c = g_store.cfg;
-
+static const char* read_settings_from_args(Settings& c) {
   long maxRun = arg_long("maxRun", c.maxRunSec);
   if (maxRun < 1) maxRun = 1;
   if (maxRun > 65535) maxRun = 65535;
@@ -377,31 +390,47 @@ static void handle_config_save() {
   if (tz > 840) tz = 840;
 
   long sensorPin = arg_long("sensorPin", c.sensorPin);
-  if (!pin_valid(sensorPin)) { send_err(400, "bad_sensor_pin"); return; }
+  if (!pin_valid(sensorPin)) return "bad_sensor_pin";
 
   uint8_t newPins[NUM_CHANNELS];
   uint8_t newInv[NUM_CHANNELS];
+  char newNames[NUM_CHANNELS][CHANNEL_NAME_MAX + 1];
+
   for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
     char key[16];
     snprintf(key, sizeof(key), "ch%u_pin", (unsigned)i);
     long p = arg_long(key, c.ch[i].pin);
-    if (!pin_valid(p)) { send_err(400, "bad_channel_pin"); return; }
+    if (!pin_valid(p)) return "bad_channel_pin";
     newPins[i] = (uint8_t)p;
 
     snprintf(key, sizeof(key), "ch%u_inv", (unsigned)i);
     newInv[i] = arg_bool(key, c.ch[i].activeLow) ? 1 : 0;
+
+    memcpy(newNames[i], c.ch[i].name, sizeof(newNames[i]));
+    snprintf(key, sizeof(key), "ch%u_name", (unsigned)i);
+    if (s_server.hasArg(key)) {
+      String nm = s_server.arg(key);
+      text_set(newNames[i], sizeof(newNames[i]), nm.c_str());
+    }
   }
+
   // проверка на дубликаты пинов
   for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
-    if (newPins[i] == (uint8_t)sensorPin) { send_err(400, "pin_conflict_sensor"); return; }
+    if (newPins[i] == (uint8_t)sensorPin) return "pin_conflict_sensor";
     for (uint8_t k = i + 1; k < NUM_CHANNELS; k++) {
-      if (newPins[i] == newPins[k]) { send_err(400, "pin_conflict"); return; }
+      if (newPins[i] == newPins[k]) return "pin_conflict";
     }
   }
 
   for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
     c.ch[i].pin = newPins[i];
     c.ch[i].activeLow = newInv[i];
+    memcpy(c.ch[i].name, newNames[i], sizeof(c.ch[i].name));
+  }
+
+  if (s_server.hasArg("name")) {
+    String nm = s_server.arg("name");
+    text_set(c.name, sizeof(c.name), nm.c_str());
   }
 
   c.sensorPin = (uint8_t)sensorPin;
@@ -421,6 +450,15 @@ static void handle_config_save() {
     c.ntpServer[sizeof(c.ntpServer) - 1] = '\0';
   }
 
+  return NULL;
+}
+
+static void handle_config_save() {
+  Settings c = g_store.cfg;
+  const char* err = read_settings_from_args(c);
+  if (err) { send_err(400, err); return; }
+  g_store.cfg = c;
+
   // Ограничение длительности задач новым предохранителем
   uint16_t maxDur = c.maxRunSec ? c.maxRunSec : DEFAULT_MAX_RUN_SEC;
   for (uint8_t i = 0; i < MAX_TASKS; i++) {
@@ -432,6 +470,141 @@ static void handle_config_save() {
   channels_apply_config();
   net_apply_time_config();
   send_ok();
+}
+
+/* Экспорт настроек и задач: обычный JSON, файл скачивает браузер.
+ * Wi-Fi (ssid/пароль) намеренно не выгружается. */
+static void handle_export() {
+  char escName[MODULE_NAME_MAX * 6 + 1];
+  char escNtp[64];
+  char timeBuf[16];
+  char dateBuf[16];
+  clock_now_strings(timeBuf, sizeof(timeBuf), dateBuf, sizeof(dateBuf));
+
+  String j;
+  j.reserve(1800);
+  j += F("{\"app\":\"" FW_NAME "\",\"fw\":\"" FW_VERSION "\",\"sv\":");
+  j += String((int)STORE_VERSION);
+  j += F(",\"exported\":\"");
+  j += dateBuf;
+  j += ' ';
+  j += timeBuf;
+  j += F("\",\"cfg\":{");
+
+  text_json_escape(g_store.cfg.name, escName, sizeof(escName));
+  j += F("\"name\":\"");
+  j += escName;
+  j += F("\",\"tz\":");
+  j += String((int)g_store.cfg.tzOffsetMin);
+  text_json_escape(g_store.cfg.ntpServer, escNtp, sizeof(escNtp));
+  j += F(",\"ntp\":\"");
+  j += escNtp;
+  j += F("\",\"sensorPin\":");
+  j += String((int)g_store.cfg.sensorPin);
+  j += F(",\"sensorInv\":");
+  j += String((int)g_store.cfg.sensorActiveLow);
+  j += F(",\"sensorPull\":");
+  j += String((int)g_store.cfg.sensorPullup);
+  j += F(",\"blockLow\":");
+  j += String((int)g_store.cfg.blockWhenLow);
+  j += F(",\"maxRun\":");
+  j += String((unsigned)g_store.cfg.maxRunSec);
+  j += F(",\"catchup\":");
+  j += String((int)g_store.cfg.catchupHours);
+
+  j += F(",\"ch\":[");
+  for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
+    if (i) j += ',';
+    text_json_escape(g_store.cfg.ch[i].name, escName, sizeof(escName));
+    j += F("{\"pin\":");
+    j += String((int)g_store.cfg.ch[i].pin);
+    j += F(",\"inv\":");
+    j += String((int)g_store.cfg.ch[i].activeLow);
+    j += F(",\"name\":\"");
+    j += escName;
+    j += F("\"}");
+  }
+  j += F("]},\"tasks\":[");
+
+  bool first = true;
+  for (uint8_t i = 0; i < MAX_TASKS; i++) {
+    const TaskCfg& t = g_store.tasks[i];
+    if (!t.used) continue;
+    if (!first) j += ',';
+    first = false;
+    j += F("{\"ch\":");
+    j += String((int)t.channel);
+    j += F(",\"h\":");
+    j += String((int)t.hour);
+    j += F(",\"m\":");
+    j += String((int)t.minute);
+    j += F(",\"dur\":");
+    j += String((unsigned)t.durationSec);
+    j += F(",\"pd\":");
+    j += String((int)t.periodDays);
+    j += F(",\"en\":");
+    j += String((int)t.enabled);
+    j += F(",\"last\":");
+    j += String((unsigned long)t.lastRun);
+    j += F(",\"next\":");
+    j += String((unsigned long)t.nextDue);
+    j += '}';
+  }
+  j += F("]}");
+
+  s_server.sendHeader("Cache-Control", "no-store");
+  s_server.sendHeader("Content-Disposition", "attachment; filename=\"autowatering-settings.json\"");
+  s_server.send(200, "application/json; charset=utf-8", j);
+}
+
+/*
+ * Импорт настроек и задач.
+ * Тело — обычная форма: name, tz, ntp, sensorPin, ..., chN_pin/chN_inv/chN_name,
+ * t0..t7 = "ch,h,m,dur,pd,en,last,next" (см. transfer.h), status=1 - переносить
+ * статус задач (иначе расписание начнётся заново).
+ * Всё проверяется до применения: при ошибке конфигурация не меняется.
+ */
+static void handle_import() {
+  Settings c = g_store.cfg;
+  const char* err = read_settings_from_args(c);
+  if (err) { send_err(400, err); return; }
+
+  const bool withStatus = arg_bool("status", false);
+  const uint16_t maxDur = c.maxRunSec ? c.maxRunSec : DEFAULT_MAX_RUN_SEC;
+
+  TaskCfg imported[MAX_TASKS];
+  memset(imported, 0, sizeof(imported));
+  uint8_t count = 0;
+
+  for (uint8_t i = 0; i < MAX_TASKS; i++) {
+    char key[8];
+    snprintf(key, sizeof(key), "t%u", (unsigned)i);
+    if (!s_server.hasArg(key)) continue;
+
+    String v = s_server.arg(key);
+    TaskCfg t;
+    if (!transfer_task_decode(v.c_str(), &t)) { send_err(400, "bad_task"); return; }
+    if (t.durationSec > maxDur) { send_err(400, "bad_task"); return; }
+    if (!withStatus) {
+      t.lastRun = 0;
+      t.nextDue = 0;      // расписание пересчитается от текущего времени
+    }
+    imported[i] = t;
+    count++;
+  }
+
+  g_store.cfg = c;
+  memcpy(g_store.tasks, imported, sizeof(imported));
+  storage_save();
+  channels_apply_config();
+  net_apply_time_config();
+
+  String j = F("{\"ok\":true,\"tasks\":");
+  j += String((int)count);
+  j += F(",\"channels\":");
+  j += String((int)NUM_CHANNELS);
+  j += '}';
+  send_json(200, j);
 }
 
 // Установка времени с телефона (устройство без RTC: пока нет NTP, время
@@ -514,7 +687,7 @@ static void handle_scan() {
   char esc[SCAN_SSID_MAX * 6 + 1];
   for (uint8_t i = 0; i < count; i++) {
     if (i) j += ',';
-    scanlist_json_escape(nets[i].ssid, esc, sizeof(esc));
+    text_json_escape(nets[i].ssid, esc, sizeof(esc));
     j += F("{\"ssid\":\"");
     j += esc;
     j += F("\",\"rssi\":");
@@ -583,6 +756,8 @@ void webui_begin() {
   s_server.on("/api/time", HTTP_POST, handle_time_set);
   s_server.on("/api/scan", HTTP_GET, handle_scan);
   s_server.on("/api/wifi", HTTP_POST, handle_wifi_save);
+  s_server.on("/api/export", HTTP_GET, handle_export);
+  s_server.on("/api/import", HTTP_POST, handle_import);
   s_server.on("/api/factory", HTTP_POST, handle_factory_reset);
   s_server.on("/api/reboot", HTTP_POST, handle_reboot);
 

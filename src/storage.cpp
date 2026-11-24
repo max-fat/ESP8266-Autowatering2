@@ -30,6 +30,7 @@ void storage_defaults() {
   g_store.version = STORE_VERSION;
 
   Settings& c = g_store.cfg;
+  c.name[0] = '\0';        // имя модуля не задано - интерфейс покажет "Автополив"
   c.ssid[0] = '\0';
   c.pass[0] = '\0';
   copy_str(c.ntpServer, sizeof(c.ntpServer), DEFAULT_NTP_SERVER);
@@ -48,7 +49,7 @@ void storage_defaults() {
     g_store.cfg.ch[i].pin = pins[i];
     g_store.cfg.ch[i].activeLow = 0;  // по умолчанию активный ВЫСОКИЙ уровень:
                                       // при старте ESP на пинах 0 В -> помпы выключены
-    g_store.cfg.ch[i].reserved = 0;
+    g_store.cfg.ch[i].name[0] = '\0'; // имя не задано - интерфейс покажет "Канал N"
   }
 
   for (uint8_t i = 0; i < MAX_TASKS; i++) {
