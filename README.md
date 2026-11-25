@@ -4,8 +4,10 @@
 **дискретный датчик низкого уровня воды**, веб-интерфейс прямо с устройства,
 расписание полива с сохранением в энергонезависимой памяти.
 
-* Версия прошивки: **1.6.0**
+* Версия прошивки: **1.6.1**
 * Готовый бинарник: [`firmware/autowatering-esp8266.bin`](firmware/autowatering-esp8266.bin)
+* Страница проекта для тех, кто хочет просто скачать: [`docs/index.html`](docs/index.html)
+  (описание, скриншоты, установка — открывается через GitHub Pages)
 * Для других ИИ/разработчиков: [`ReadAI.md`](ReadAI.md)
 
 ---
@@ -359,6 +361,38 @@ flash и запустить». Поэтому обновление не треб
 
 ---
 
+## Страница проекта (`docs/`)
+
+Для тех, кто просто хочет взять прошивку, есть отдельная страница — [`docs/index.html`](docs/index.html):
+описание возможностей, экраны интерфейса, быстрая установка, блок обновления и кнопка скачивания `.bin`.
+Это статический HTML без JavaScript и внешних зависимостей.
+
+Как открыть:
+
+* **GitHub Pages** (рекомендуется): Settings → Pages → Source: «Deploy from a branch»,
+  ветка `main`, папка `/docs`. Адрес получится `https://<владелец>.github.io/ESP8266-Autowatering2/`.
+* Либо локально: `python3 -m http.server -d docs 8000` и открыть `http://localhost:8000/`.
+
+Как поддерживать в актуальном виде:
+
+| Что | Чем |
+|---|---|
+| Скриншоты (`docs/img/*.png`) | `node tools/screenshots.js` — снимает **настоящий** `web/index.html` с подменённой сетью (Chromium через `puppeteer-core`), кадры: задачи, каналы, настройки, карточка обновления, первый запуск, общий вид |
+| Версия, размер, MD5, дата на странице | `python3 tools/update_docs.py` — берёт цифры из `firmware/build-info.txt`; `--check` только сверяет |
+| Тексты, разделы | руками в `docs/index.html` |
+
+Скриншоты снимаются не «на память», а с живого интерфейса, поэтому после правок в
+`web/index.html` их достаточно перегенерировать: `python3 tools/embed_web.py`,
+затем `node tools/screenshots.js`, затем `python3 tools/update_docs.py`.
+
+Для `tools/screenshots.js` нужны одноразовые зависимости:
+
+```bash
+npm i puppeteer-core @sparticuz/chromium   # или CHROME=/usr/bin/chromium node tools/screenshots.js
+```
+
+---
+
 ## Структура репозитория
 
 ```
@@ -378,11 +412,15 @@ src/
   otacheck.*        проверка файла прошивки (.bin, 32 КБ … свободное место)
   page_html.h       сгенерированный (gzip) веб-интерфейс
 web/index.html      исходник интерфейса
+docs/               страница проекта для GitHub Pages (index.html + img/)
+  img/              скриншоты интерфейса (снимаются tools/screenshots.js)
 tools/
   embed_web.py      web/index.html -> src/page_html.h
   build_firmware.sh сборка без PlatformIO
   elf2bin.py        eboot + sketch -> единый .bin
   flash.sh          прошивка через esptool
+  screenshots.js    скриншоты интерфейса для docs/img (Chromium)
+  update_docs.py    версия/размер/MD5 на странице проекта — из build-info.txt
 firmware/           готовый бинарник и сводка о сборке
 ```
 

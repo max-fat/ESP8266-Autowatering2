@@ -70,11 +70,15 @@
 | `src/otacheck.h/.cpp` | Чистые правила выбора файла прошивки (`otacheck_file`: `.bin`, не меньше 32 КБ, не больше свободного места) — их же повторяет JS, чтобы ошибка была видна до отправки. Покрыт host-тестами |
 | `src/webui.h/.cpp` | HTTP-сервер, REST API, сборка JSON вручную, отдача gzip-страницы |
 | `src/page_html.h` | **Генерируется** из `web/index.html` — не редактировать руками |
-| `web/index.html` | Интерфейс: 3 вкладки, опрос `/api/state` каждые 2 с |
+| `web/index.html` | Интерфейс: 3 вкладки (адрес `#tasks/#channels/#settings` открывает нужную), опрос `/api/state` каждые 2 с |
+| `docs/index.html` | Страница проекта для GitHub Pages (`main` + `/docs`): описание, скриншоты, установка, кнопка скачивания. Статический HTML, без JS и внешних CDN. Цифры версии/размера/MD5 подставляет `tools/update_docs.py` — правьте их только через него |
+| `docs/img/*.png` | Скриншоты интерфейса. **Не рисуйте руками**: снимаются с живого `web/index.html` скриптом `tools/screenshots.js` (Chromium + подмена `fetch`) |
 | `tools/embed_web.py` | `web/index.html` → `src/page_html.h` (gzip, детерминированный: `mtime=0`) |
 | `tools/build_firmware.sh` | Офлайн-сборка без PlatformIO (ядро 2.4.2 + xtensa gcc 4.8.2) |
 | `tools/elf2bin.py` | Склейка `eboot.elf` + `sketch.elf` в один `.bin` (вендорная копия из core 3.1.2 с патчем) |
 | `tools/pio_embed_web.py` | PlatformIO pre-build hook: пересобирает `page_html.h` |
+| `tools/screenshots.js` | Скриншоты `docs/img/*.png`: настоящий интерфейс с фейковым API (`puppeteer-core` + `@sparticuz/chromium`). Каждый кадр — новая вкладка: `setContent` в одной переиспользует глобальную область и ломается на повторном `let` |
+| `tools/update_docs.py` | Синхронизирует версию/размер/MD5/дату в `docs/index.html` с `firmware/build-info.txt`; `--check` для проверки в CI/перед коммитом |
 | `tools/flash.sh` / `tools/flash.bat` | Прошивка через esptool (`COM7`, 921600 по умолчанию) |
 | `platformio.ini` | Сборка/загрузка через PlatformIO (`board = nodemcuv2`) |
 | `tests/host/` | Хост-тесты логики (заглушки Arduino/EEPROM, `make -C tests/host run`) — 68 проверок: storage/CRC, помпы, датчик, планировщик |
@@ -262,6 +266,9 @@ esptool.py --chip esp8266 --port COM7 --baud 921600 write_flash \
 2. `python3 tools/embed_web.py` — интерфейс упаковался.
 3. Синтаксис JS: извлечь `<script>` из `web/index.html` и прогнать
    `node --check`.
+   Меняли интерфейс — пересоберите `page_html.h`, переснимите скриншоты
+   (`node tools/screenshots.js`) и обновите цифры на странице
+   (`python3 tools/update_docs.py`); страница не должна врать про версию.
 4. UI в jsdom с фейковым API: шапка (время/датчик), список задач, каналы,
    заполнение настроек, POST-запросы по кнопкам, отсутствие ошибок JS.
    Для OTA подменяйте `XMLHttpRequest` (fetch не умеет `upload.onprogress`).

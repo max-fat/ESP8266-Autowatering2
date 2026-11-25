@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Автополив на ESP8266 — прошивка для контроллера полива растений</title>
+<meta name="description" content="Прошивка для ESP8266: 4 канала помп, датчик низкого уровня воды, расписание полива и веб-интерфейс прямо с устройства. Без облака и подписки. Скачать .bin и обновлять по Wi-Fi.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%230b1220'/%3E%3Cpath d='M16 6c3.5 4.4 6 7.6 6 11a6 6 0 0 1-12 0c0-3.4 2.5-6.6 6-11z' fill='%2335d07f'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0b1220; --bg2:#0e1626; --card:#121c2e; --card2:#16233a; --line:#22304a;
+  --txt:#e6edf7; --muted:#8698b8; --accent:#35d07f; --accent2:#1fbf6e;
+  --warn:#ffb020; --blue:#4aa8ff; --radius:16px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--bg); color:var(--txt);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,"Noto Sans",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+img{max-width:100%;height:auto;display:block}
+code{
+  font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  background:#0d1728;border:1px solid var(--line);border-radius:6px;padding:1px 5px
+}
+pre{
+  background:#0a1424;border:1px solid var(--line);border-radius:12px;padding:14px 16px;
+  overflow:auto;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:10px 0
+}
+pre code{background:none;border:0;padding:0}
+.wrap{max-width:1060px;margin:0 auto;padding:0 20px}
+
+/* ---------- шапка ---------- */
+header.top{
+  position:sticky;top:0;z-index:20;backdrop-filter:blur(10px);
+  background:rgba(11,18,32,.86);border-bottom:1px solid var(--line)
+}
+.top .wrap{display:flex;align-items:center;gap:18px;height:62px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.2px;color:var(--txt)}
+.brand:hover{text-decoration:none}
+.brand svg{width:22px;height:22px;fill:var(--accent);flex:0 0 auto}
+nav.top-links{display:flex;gap:16px;margin-left:auto;font-size:14px;color:var(--muted)}
+nav.top-links a{color:var(--muted)}
+nav.top-links a:hover{color:var(--txt);text-decoration:none}
+@media(max-width:760px){nav.top-links{display:none}}
+
+/* ---------- кнопки ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;padding:13px 20px;border-radius:12px;
+  font-weight:700;font-size:15px;border:1px solid transparent;transition:.15s;white-space:nowrap
+}
+.btn:hover{text-decoration:none;transform:translateY(-1px)}
+.btn-primary{background:linear-gradient(180deg,var(--accent),var(--accent2));color:#04220f}
+.btn-primary:hover{box-shadow:0 8px 24px rgba(53,208,127,.25)}
+.btn-ghost{background:var(--card2);border-color:var(--line);color:var(--txt)}
+.btn-sm{padding:9px 14px;font-size:14px;border-radius:10px}
+
+/* ---------- hero ---------- */
+.hero{padding:56px 0 24px;position:relative;overflow:hidden}
+.hero:before{
+  content:"";position:absolute;inset:-20% -10% auto -10%;height:520px;
+  background:radial-gradient(600px 320px at 25% 20%,rgba(53,208,127,.16),transparent 70%),
+             radial-gradient(600px 320px at 80% 0%,rgba(74,168,255,.12),transparent 70%);
+  pointer-events:none
+}
+.hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:36px;align-items:center}
+@media(max-width:880px){.hero .wrap{grid-template-columns:1fr;gap:24px}}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}
+.chip{
+  font-size:12.5px;font-weight:600;color:var(--muted);border:1px solid var(--line);
+  background:var(--card);border-radius:999px;padding:6px 12px
+}
+.chip.on{color:#7ef0b0;border-color:#1d5c3b;background:#0e2a1d}
+h1{font-size:42px;line-height:1.12;margin:0 0 14px;letter-spacing:-.5px}
+@media(max-width:520px){h1{font-size:32px}}
+.lead{font-size:17.5px;color:#c6d3e8;margin:0 0 24px;max-width:52ch}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:18px}
+.meta{font-size:13px;color:var(--muted)}
+.meta b{color:var(--txt);font-weight:600}
+.shot-frame{
+  border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--card);
+  box-shadow:0 24px 60px rgba(0,0,0,.45)
+}
+.shot-frame img{width:100%}
+
+/* ---------- секции ---------- */
+section{padding:54px 0}
+section:nth-of-type(even){background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+h2{font-size:28px;margin:0 0 10px;letter-spacing:-.3px}
+@media(max-width:520px){h2{font-size:23px}}
+.sub{color:var(--muted);margin:0 0 28px;max-width:62ch}
+
+/* ---------- возможности ---------- */
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+.feature{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.feature svg{width:22px;height:22px;fill:var(--accent);margin-bottom:10px}
+.feature h3{margin:0 0 6px;font-size:16px}
+.feature p{margin:0;color:var(--muted);font-size:14.5px}
+
+/* ---------- экраны ---------- */
+.screens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:18px}
+figure.screen{margin:0 auto;width:100%;max-width:250px}
+.phone{
+  background:#0a1322;border:1px solid var(--line);border-radius:26px;padding:8px;
+  box-shadow:0 18px 40px rgba(0,0,0,.4)
+}
+.phone img{border-radius:19px;border:1px solid #1b2942}
+figure.cardshot{margin:0}
+figure.cardshot img{border-radius:16px;border:1px solid var(--line);box-shadow:0 18px 40px rgba(0,0,0,.4)}
+figcaption{margin-top:10px;font-size:13.5px;color:var(--muted)}
+figcaption b{color:var(--txt);font-weight:600}
+
+/* ---------- шаги ---------- */
+.steps{counter-reset:step;display:grid;gap:14px}
+.step{
+  position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 18px 18px 62px
+}
+.step:before{
+  counter-increment:step;content:counter(step);
+  position:absolute;left:18px;top:16px;width:28px;height:28px;border-radius:50%;
+  display:grid;place-items:center;background:var(--card2);border:1px solid var(--line);
+  font-weight:800;font-size:14px;color:var(--accent)
+}
+.step h3{margin:0 0 6px;font-size:16px}
+.step p{margin:0;color:var(--muted);font-size:14.5px}
+.step pre{margin:10px 0 0}
+
+/* ---------- две колонки ---------- */
+.two{display:grid;grid-template-columns:1.1fr .9fr;gap:34px;align-items:center}
+@media(max-width:880px){.two{grid-template-columns:1fr;gap:22px}}
+ul.ticks{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+ul.ticks li{position:relative;padding-left:26px;color:#c6d3e8;font-size:15px}
+ul.ticks li:before{
+  content:"";position:absolute;left:0;top:6px;width:14px;height:14px;border-radius:4px;
+  background:rgba(53,208,127,.16);border:1px solid #1d5c3b
+}
+ul.ticks li b{color:var(--txt)}
+
+/* ---------- релиз ---------- */
+.release{
+  display:flex;flex-wrap:wrap;gap:18px 28px;align-items:center;justify-content:space-between;
+  background:linear-gradient(180deg,var(--card),#101a2b);border:1px solid var(--line);
+  border-radius:18px;padding:22px
+}
+.release .v{font-size:22px;font-weight:800;letter-spacing:-.3px}
+.release dl{margin:0;display:flex;flex-wrap:wrap;gap:10px 26px}
+.release div.item{font-size:13px;color:var(--muted)}
+.release div.item b{display:block;color:var(--txt);font-size:14.5px;font-weight:700;margin-top:2px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.note{font-size:13px;color:var(--muted);margin-top:14px}
+
+/* ---------- подвал ---------- */
+footer{padding:34px 0 50px;border-top:1px solid var(--line);color:var(--muted);font-size:13.5px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:14px 28px;justify-content:space-between;align-items:center}
+footer a{color:var(--muted)}
+footer a:hover{color:var(--txt)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c3 3.9 6.5 7.4 6.5 11.5a6.5 6.5 0 0 1-13 0C5.5 9.4 9 5.9 12 2z"/></svg>
+      Автополив
+    </a>
+    <nav class="top-links">
+      <a href="#features">Возможности</a>
+      <a href="#screens">Экраны</a>
+      <a href="#install">Установка</a>
+      <a href="#update">Обновление</a>
+      <a href="#limits">Ограничения</a>
+      <a href="https://github.com/max-fat/ESP8266-Autowatering2">GitHub</a>
+    </nav>
+    <a class="btn btn-primary btn-sm" id="topDownload" href="#download">Скачать</a>
+  </div>
+</header>
+
+<div class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <div class="chips">
+        <span class="chip on">ESP8266</span>
+        <span class="chip">4 канала</span>
+        <span class="chip">веб-интерфейс</span>
+        <span class="chip">без облака</span>
+      </div>
+      <h1>Автополив растений<br>на ESP8266</h1>
+      <p class="lead">
+        Прошивка для контроллера полива: четыре помпы, датчик низкого уровня воды,
+        расписание по дням и полноценный веб-интерфейс прямо с платы — без приложения,
+        аккаунта и подписки. Обновляется по Wi-Fi, настройки и задачи живут в EEPROM.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" id="heroDownload" href="#download">Скачать прошивку</a>
+        <a class="btn btn-ghost" href="https://github.com/max-fat/ESP8266-Autowatering2">Исходники на GitHub</a>
+      </div>
+      <p class="meta">
+        Версия <b data-fw="version">1.6.1</b> · <b data-fw="size">315 КБ</b> · один файл <code>.bin</code> ·
+        NodeMCU / Wemos D1 mini, 4 МБ flash
+      </p>
+    </div>
+    <div class="shot-frame">
+      <img src="img/hero.png" width="2000" height="1800"
+           alt="Веб-интерфейс автополива: шапка с часами и датчиком уровня, список задач полива">
+    </div>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Что умеет</h2>
+    <p class="sub">Всё, что нужно для полива на балконе, в теплице или на даче — в одной прошивке и без внешних сервисов.</p>
+    <div class="features">
+      <div class="feature">
+        <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 5v5.6l4 2.3-.9 1.5L11 13.5V7h2z"/></svg>
+        <h3>Расписание по дням</h3>
+        <p>До 8 задач: время старта, длительность в секундах, период от 1 до 60 дней.
+           «Догоняющий» полив наверстает пропущенный запуск, если устройство было выключено.</p>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 24 24"><path d="M12 2C9 6 5.5 9.4 5.5 13.5a6.5 6.5 0 0 0 13 0C18.5 9.4 15 6 12 2z"/></svg>
+        <h3>Ручное управление</h3>
+        <p>Кнопки «Пуск на N секунд» и «Стоп» для каждого канала. Канал можно назвать —
+           «Орхидеи», «Томаты», «Газон» — и имя появится в задачах и уведомлениях.</p>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zm0 13L2 10v7l10 5 10-5v-7l-10 5z"/></svg>
+        <h3>Датчик уровня воды</h3>
+        <p>Поплавок или контактный датчик: при низком уровне воды полив аварийно
+           останавливается, а в интерфейсе видно причину остановки.</p>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 24 24"><path d="M3 17h18v2H3v-2zm2-6h3v5H5v-5zm5-4h3v9h-3V7zm5 2h3v7h-3V9z"/></svg>
+        <h3>Работает без интернета</h3>
+        <p>Нет сохранённой сети — контроллер поднимает точку доступа <code>AutoWater-XXXXXX</code>
+           с captive portal: сеть выбирается из списка прямо с телефона.</p>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-2.05-4.95L14 10h7V3l-2.5 2.5A8.96 8.96 0 0 0 12 3z"/></svg>
+        <h3>Обновление по Wi-Fi</h3>
+        <p>Новая прошивка загружается через браузер: выбрали файл, нажали кнопку —
+           контроллер записал образ во flash и перезагрузился. Кабель не нужен.</p>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3zm-1 13-3-3 1.4-1.4L11 12.2l4.6-4.6L17 9l-6 6z"/></svg>
+        <h3>Настройки не теряются</h3>
+        <p>Всё хранится в EEPROM с контрольной суммой: настройки, задачи, время последнего
+           и следующего полива. Питание пропало — расписание продолжится.</p>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16v4H4V4zm0 6h16v4H4v-4zm0 6h16v4H4v-4z"/></svg>
+        <h3>Резервная копия</h3>
+        <p>Настройки и задачи выгружаются в JSON-файл и загружаются в другой модуль —
+           удобно клонировать конфигурацию на второй контроллер.</p>
+      </div>
+      <div class="feature">
+        <svg viewBox="0 0 24 24"><path d="M8 3h8l-1 6h4l-9 12 2-9H6l2-9z"/></svg>
+        <h3>Открытый код</h3>
+        <p>C++11, Arduino core 2.4.2, без облачных зависимостей. Собирается скриптом
+           <code>tools/build_firmware.sh</code> без Arduino IDE и PlatformIO.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="screens">
+  <div class="wrap">
+    <h2>Экраны</h2>
+    <p class="sub">Настоящий интерфейс контроллера — открывается с телефона по адресу устройства в локальной сети.</p>
+    <div class="screens">
+      <figure class="screen">
+        <div class="phone"><img src="img/tasks.png" width="800" height="1400" loading="lazy"
+          alt="Вкладка «Задачи»: форма новой задачи и список задач с временем следующего полива"></div>
+        <figcaption><b>Задачи.</b> Время, длительность, период, статус и следующее включение. «Пуск» проверяет канал, не меняя расписание.</figcaption>
+      </figure>
+      <figure class="screen">
+        <div class="phone"><img src="img/channels.png" width="800" height="1400" loading="lazy"
+          alt="Вкладка «Каналы»: карточки каналов с именами, таймером и кнопками пуска и остановки"></div>
+        <figcaption><b>Каналы.</b> Ручной пуск на заданное число секунд, остаток времени и остановка. Имя канала — рядом с номером.</figcaption>
+      </figure>
+      <figure class="screen">
+        <div class="phone"><img src="img/settings.png" width="800" height="1400" loading="lazy"
+          alt="Вкладка «Настройки»: имя модуля, Wi-Fi и пины помп"></div>
+        <figcaption><b>Настройки.</b> Имя модуля, Wi-Fi со сканированием сетей, пины помп и имена каналов, датчик, часовой пояс.</figcaption>
+      </figure>
+      <figure class="screen">
+        <div class="phone"><img src="img/ota.png" width="800" height="1400" loading="lazy"
+          alt="Карточка «Обновление прошивки»: выбран файл .bin и свободное место под новый образ"></div>
+        <figcaption><b>Обновление по Wi-Fi.</b> Выбрать <code>.bin</code> и нажать кнопку — модуль сам перезагрузится в новую версию.</figcaption>
+      </figure>
+      <figure class="screen">
+        <div class="phone"><img src="img/ap.png" width="800" height="1400" loading="lazy"
+          alt="Первый запуск: режим точки доступа и список найденных Wi-Fi сетей с уровнем сигнала"></div>
+        <figcaption><b>Первый запуск.</b> Точка доступа, поиск сетей вокруг и выбор своей — пароль вводится вручную.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Установка</h2>
+    <p class="sub">Один файл прошивки, один кабель и телефон для настройки сети.</p>
+    <div class="steps">
+      <div class="step">
+        <h3>Скачайте прошивку</h3>
+        <p>Файл <code>autowatering-esp8266.bin</code> — версия <b data-fw="version">1.6.1</b>,
+           <b data-fw="size">315 КБ</b>. Ссылка ведёт на страницу релизов, там же лежат прошлые версии.</p>
+      </div>
+      <div class="step">
+        <h3>Прошейте плату</h3>
+        <p>ESP8266 подключается по USB. Команда для любого ПК с Python; на Windows проще
+           <i>NodeMCU-PyFlasher</i> — выбрать файл, адрес <code>0x00000</code>, скорость 921600.</p>
+        <pre><code>pip install esptool
+esptool --chip esp8266 --port COM7 --baud 921600 \
+  write_flash --flash_mode dout --flash_freq 40m --flash_size 4MB \
+  0x00000 autowatering-esp8266.bin</code></pre>
+      </div>
+      <div class="step">
+        <h3>Подключите к своей сети</h3>
+        <p>После прошивки контроллер поднимает сеть <code>AutoWater-XXXXXX</code> (со своим паролем
+           Wi-Fi на телефоне). Откройте <code>192.168.4.1</code>, нажмите «Сканировать», выберите
+           домашнюю сеть 2.4 ГГц, введите пароль — устройство перезагрузится и покажет свой IP.
+           Дальше интерфейс доступен по этому адресу из любой точки домашней сети.</p>
+      </div>
+    </div>
+    <p class="note">Нужен ESP8266 с <b>4 МБ flash</b> (NodeMCU v3, Wemos D1 mini, ESP-12F-модули).
+       Платы на 1 МБ прошивкой не поддерживаются.</p>
+  </div>
+</section>
+
+<section id="update">
+  <div class="wrap two">
+    <div>
+      <h2>Обновление по Wi-Fi</h2>
+      <p class="sub">Начиная с 1.6.0 прошивка обновляется из браузера — кабель нужен только один раз, при первой установке.</p>
+      <ul class="ticks">
+        <li><b>Новый образ пишется в свободную область flash</b> — модуль продолжает работать на старой версии, пока новая не принята целиком.</li>
+        <li><b>Оборвалась связь или не тот файл</b> — контроллер остаётся на прежней прошивке и показывает причину в интерфейсе.</li>
+        <li><b>Полив останавливается</b> на время записи — помпа не останется включённой.</li>
+        <li><b>Настройки, задачи и имена каналов сохраняются</b> — обновление их не трогает.</li>
+      </ul>
+      <div class="cta" style="margin-top:22px">
+        <a class="btn btn-ghost" href="#download">Скачать новую версию</a>
+      </div>
+    </div>
+    <figure class="cardshot">
+      <img src="img/ota-card.png" loading="lazy"
+        alt="Карточка «Обновление прошивки»: выбран файл autowatering-esp8266.bin и свободное место под новый образ">
+      <figcaption>Так это выглядит на телефоне: «Настройки» → «Обновление прошивки» → выбрать файл.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="inside">
+  <div class="wrap">
+    <h2>Под капотом</h2>
+    <p class="sub">Небольшой проект без «магии»: понятная структура, REST API и тесты логики, которые гоняются без железа.</p>
+    <div class="features">
+      <div class="feature">
+        <h3>Веб-сервер на устройстве</h3>
+        <p>ESP8266WebServer отдаёт одностраничный интерфейс (gzip в flash) и JSON API:
+           <code>/api/state</code>, <code>/api/config</code>, <code>/api/task</code>,
+           <code>/api/ota</code>, <code>/api/export</code>.</p>
+      </div>
+      <div class="feature">
+        <h3>Хранение без базы</h3>
+        <p>Структуры фиксированного размера в секторе EEPROM с CRC32 и версией формата:
+           обновление прошивки не сбрасывает настройки.</p>
+      </div>
+      <div class="feature">
+        <h3>Тесты на хосте</h3>
+        <p>Логика хранилища, планировщика, помп, импорта и сборки JSON проверяется обычным
+           <code>make -C tests/host run</code> — 230+ проверок, включая настоящий парсинг JSON.</p>
+      </div>
+      <div class="feature">
+        <h3>Сборка без IDE</h3>
+        <p>Кросс-компилятор xtensa-lx106-elf (GCC 4.8.2) и Arduino core 2.4.2 — скрипт
+           собирает готовый <code>.bin</code> с загрузчиком <code>eboot</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="wrap">
+    <h2>Ограничения и мелочи, о которых стоит знать</h2>
+    <div class="two">
+      <ul class="ticks">
+        <li>Только сети <b>2.4 ГГц</b> — ESP8266 не умеет 5 ГГц.</li>
+        <li><b>4 канала</b> и <b>до 8 задач</b>; длительность ограничена предохранителем (по умолчанию 600 с).</li>
+        <li>Интерфейс <b>без пароля</b> — держите устройство в доверенной сети.</li>
+        <li>Часовой пояс — фиксированное смещение от UTC (шаг 30 минут), перехода на летнее время нет.</li>
+        <li>Часов с батарейкой нет: после включения время берётся по NTP, без интернета — с телефона одной кнопкой.</li>
+      </ul>
+      <div>
+        <h3 style="margin-top:0">Что понадобится</h3>
+        <ul class="ticks">
+          <li>ESP8266 4 МБ (NodeMCU v3, Wemos D1 mini)</li>
+          <li>Модуль реле на 4 канала (или 4 полевых транзистора под свои насосы)</li>
+          <li>Датчик уровня воды (поплавок или контактный)</li>
+          <li>Питание 5 В с запасом по току под насосы</li>
+        </ul>
+        <p class="note">Пины по умолчанию: помпы GPIO4, GPIO5, GPIO12, GPIO14, датчик GPIO13 — меняются в настройках.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Скачать</h2>
+    <p class="sub">Один файл — вся прошивка: загрузчик, интерфейс и код.</p>
+    <div class="release">
+      <div>
+        <div class="v">Автополив <span data-fw="version">1.6.1</span></div>
+        <div class="note">Прошивка для ESP8266 с 4 МБ flash. Прошивается одним файлом с адреса <code>0x00000</code>.</div>
+      </div>
+      <dl>
+        <div class="item">Размер <b data-fw="size">315 КБ</b></div>
+        <div class="item">MD5 <b data-fw="md5">8f325ad888e6ef5ce3805e44dca62df8</b></div>
+        <div class="item">Собрано <b data-fw="date">2026-11-25</b></div>
+      </dl>
+      <div class="cta" style="margin:0">
+        <a class="btn btn-primary" id="downloadBin"
+           href="https://github.com/max-fat/ESP8266-Autowatering2/raw/main/firmware/autowatering-esp8266.bin">
+          Скачать .bin
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/max-fat/ESP8266-Autowatering2/releases">Все версии</a>
+      </div>
+    </div>
+    <p class="note">
+      Ссылка ведёт на файл в репозитории (<code>firmware/autowatering-esp8266.bin</code>); прошлые
+      версии и заметки о выпусках — в разделе релизов. Проверить целостность файла:
+      <code>certutil -hashfile autowatering-esp8266.bin MD5</code> (Windows) или
+      <code>md5sum autowatering-esp8266.bin</code> (Linux/macOS) — значение должно совпасть с указанным выше.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>
+      Автополив на ESP8266 · версия <span data-fw="version">1.6.1</span> ·
+      <a href="https://github.com/max-fat/ESP8266-Autowatering2">исходники</a> ·
+      <a href="https://github.com/max-fat/ESP8266-Autowatering2/issues">вопросы и идеи</a>
+    </div>
+    <div>
+      <a href="https://github.com/max-fat/ESP8266-Autowatering2/blob/main/README.md">README</a> ·
+      <a href="https://github.com/max-fat/ESP8266-Autowatering2/blob/main/ReadAI.md">ReadAI</a> ·
+      <a href="https://github.com/max-fat/ESP8266-Autowatering2/releases">релизы</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
