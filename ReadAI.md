@@ -68,11 +68,11 @@
 | `src/webjson.h/.cpp` | Сборка JSON для `/api/state`, `/api/config`, `/api/export` — без HTTP, поэтому проверяется host-тестами (`test_webjson`, `tests/host/check_json.py`). Добавили поле в JSON — добавьте проверку сюда: пропавшее поле не ломает сборку, но ломает интерфейс |
 | `src/ota.h/.cpp` | Обновление по Wi-Fi: `ota_begin/write/finish/abort` поверх `Update` (ядро), остановка помп на время записи flash, отложенная перезагрузка (`eboot` копирует принятый образ в начало flash). Новый образ пишется в свободную область между прошивкой и SPIFFS — второй копии в обычной памяти не нужно |
 | `src/otacheck.h/.cpp` | Чистые правила выбора файла прошивки (`otacheck_file`: `.bin`, не меньше 32 КБ, не больше свободного места) — их же повторяет JS, чтобы ошибка была видна до отправки. Покрыт host-тестами |
-| `src/webui.h/.cpp` | HTTP-сервер, REST API, сборка JSON вручную, отдача gzip-страницы |
+| `src/webui.h/.cpp` | HTTP-сервер, REST API, сборка JSON вручную, отдача gzip-страницы. Все ответы `/api/*` идут с `Access-Control-Allow-Origin: *`, на `OPTIONS` — 204 с разрешёнными методами: без CORS сканер сети и обновление соседних модулей из браузера не работают. `/api/ident` — короткая визитка (app/fw/name/ch/ip) для сканера |
 | `src/page_html.h` | **Генерируется** из `web/index.html` — не редактировать руками |
-| `web/index.html` | Интерфейс: 3 вкладки (адрес `#tasks/#channels/#settings` открывает нужную), опрос `/api/state` каждые 2 с |
-| `docs/index.html` | Страница проекта для GitHub Pages (`main` + `/docs`): описание, скриншоты, установка, кнопка скачивания и **прошивка по USB из браузера** (раздел `#flash`: Web Serial + `docs/js/flasher.js`). Статический HTML без внешних CDN; единственный скрипт — прошивальщик, он грузится по нажатию кнопки. Цифры версии/размера/MD5 подставляет `tools/update_docs.py` — правьте их только через него |
-| `docs/img/*.png` | Скриншоты интерфейса. **Не рисуйте руками**: снимаются с живого `web/index.html` скриптом `tools/screenshots.js` (Chromium + подмена `fetch`) |
+| `web/index.html` | Интерфейс: 3 вкладки (адрес `#tasks/#channels/#settings` открывает нужную), опрос `/api/state` каждые 2 с. В «Настройках» — карточка «Другие модули в сети» (`#fleetCard`): поиск по `/api/ident` в подсети и обновление выбранного модуля через `POST /api/ota`; файл берётся из репозитория или из своего `.bin`. Версию в репозитории уточняем с таймаутом 4 с — иначе без интернета поиск «висит» |
+| `docs/index.html` | Страница проекта для GitHub Pages (`main` + `/docs`): описание, скриншоты, установка, кнопка скачивания, **прошивка по USB из браузера** (раздел `#flash`: Web Serial + `docs/js/flasher.js`) и **обновление модулей в сети** (раздел `#fleet`: сканер `/api/ident` по подсети и загрузка `.bin` на `POST /api/ota` выбранного модуля; файл — свой или из `docs/firmware/`). С https-страницы Chrome может блокировать запросы к http-модулям — для этого случая в разделе есть объяснение и тот же сканер внутри интерфейса модуля. Статический HTML без внешних CDN; прошивальщик (374 КБ) грузится отдельным скриптом только по нажатию кнопки, сканер сети — небольшим инлайновым скриптом. Цифры версии/размера/MD5 подставляет `tools/update_docs.py` — правьте их только через него |
+| `docs/img/*.png` | Скриншоты интерфейса. **Не рисуйте руками**: снимаются с живого `web/index.html` скриптом `tools/screenshots.js` (Chromium + подмена `fetch`). `fleet.png` — карточка «Другие модули в сети» с тремя модулями (в подмене сети есть отдельная ветка `/api/ident`) |
 | `docs/js/flasher.js` | Собранный прошивальщик страницы (esptool-js 0.7.1 + crypto-js в одном IIFE). **Не править руками** — исходник в `tools/flasher/src/flasher.js`, сборка `node tools/build_flasher.js`. Отдаёт `window.EspFlasher`: `isSupported()`, `requestPort()`, `md5()`, `flash({data, port})` |
 | `docs/firmware/autowatering-esp8266.bin` | Копия прошивки для страницы прошивальщика — страница скачивает её с того же домена, без обращений к GitHub. Кладёт `tools/update_docs.py`, MD5 обязан совпадать с `firmware/build-info.txt` |
 | `tools/embed_web.py` | `web/index.html` → `src/page_html.h` (gzip, детерминированный: `mtime=0`) |
@@ -275,6 +275,9 @@ esptool.py --chip esp8266 --port COM7 --baud 921600 write_flash \
    Меняли прошивальщик — `node tools/build_flasher.js` (нужны `esptool-js`,
    `crypto-js`, `esbuild`) и проверьте `python3 tools/update_docs.py --check`:
    копия `.bin` в `docs/firmware/` должна совпадать с `firmware/` по MD5.
+5. Новые ручки `/api/*` — сразу с CORS (см. `send_cors()` в `webui.cpp`), иначе
+   сканер сети и обновление соседних модулей перестанут их видеть. Для новых
+   полей в `/api/ident` обновите `tests/host/check_json.py` (режим `ident`).
 4. UI в jsdom с фейковым API: шапка (время/датчик), список задач, каналы,
    заполнение настроек, POST-запросы по кнопкам, отсутствие ошибок JS.
    Для OTA подменяйте `XMLHttpRequest` (fetch не умеет `upload.onprogress`).

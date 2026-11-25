@@ -752,6 +752,24 @@ static void test_webjson() {
   CHECK(strstr(e, "\"name\":\"Газон\"") != NULL);
   CHECK(strstr(e, "secret123") == NULL);          // Wi-Fi не выгружается
   CHECK(strstr(e, "HomeNet") == NULL);
+
+  // 5. визитка для сканера соседних модулей (/api/ident): метка приложения,
+  //    версия и имя. Метка проверяется браузером — без неё сканер показывал бы
+  //    в списке любой сервер в сети. Ответ нарочно короткий: при поиске по
+  //    сети он запрашивается у 254 адресов.
+  String id = webjson_ident();
+  const char* i = id.c_str();
+  CHECK(strstr(i, "\"app\":\"autowatering\"") != NULL);
+  CHECK(strstr(i, "\"name\":\"Теплица\"") != NULL);
+  String idFw = String("\"fw\":\"") + FW_VERSION + "\"";
+  CHECK(strstr(i, idFw.c_str()) != NULL);
+  CHECK(strstr(i, "\"ch\":4") != NULL);
+  CHECK(id.length() < 140);
+
+  // кавычки в имени не ломают визитку (иначе сканер потеряет модуль)
+  strcpy(g_store.cfg.name, "Теплица \"№2\"");
+  String id2 = webjson_ident();
+  CHECK(strstr(id2.c_str(), "\"name\":\"Теплица \\\"№2\\\"\"") != NULL);
 }
 
 /* ---------------- проверка файла прошивки (otacheck.*) ---------------- */
@@ -832,6 +850,7 @@ int main(int argc, char** argv) {
     else if (strcmp(argv[1], "--dump-config") == 0) out = webjson_config();
     else if (strcmp(argv[1], "--dump-export") == 0) out = webjson_export();
     else if (strcmp(argv[1], "--dump-ota") == 0)    out = webjson_ota();
+    else if (strcmp(argv[1], "--dump-ident") == 0)  out = webjson_ident();
     printf("%s\n", out.c_str());
     return 0;
   }

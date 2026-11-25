@@ -2,7 +2,7 @@
 """Проверка JSON, который прошивка отдаёт в интерфейс.
 
 Собирается бинарником host-тестов (режимы --dump-state / --dump-config /
---dump-export), а разбирается настоящим парсером — так ловится любая ошибка
+--dump-export / --dump-ota / --dump-ident), а разбирается настоящим парсером — так ловится любая ошибка
 форматирования, которую не видно при сборке прошивки (запятая, кавычка,
 потерянное поле).
 
@@ -17,6 +17,15 @@ FAILS = []
 def check(cond, msg):
     if not cond:
         FAILS.append(msg)
+
+
+def check_ident(d):
+    """Визитка для сканера (/api/ident): метка приложения и версия."""
+    check(d.get("app") == "autowatering", "нет метки app=autowatering")
+    check(bool(d.get("fw")), "нет версии fw")
+    check(isinstance(d.get("ch"), int) and d["ch"] > 0, "нет числа каналов ch")
+    check(isinstance(d.get("name"), str), "нет имени name")
+    check(isinstance(d.get("ip"), str), "нет адреса ip")
 
 
 def check_state(d):
@@ -91,7 +100,7 @@ def check_ota(d):
 
 def main():
     if len(sys.argv) < 2:
-        print("использование: check_json.py state|config|export < json")
+        print("использование: check_json.py state|config|export|ota|ident < json")
         return 2
     what = sys.argv[1]
     raw = sys.stdin.read()
@@ -103,7 +112,7 @@ def main():
         return 1
 
     {"state": check_state, "config": check_config, "export": check_export,
-     "ota": check_ota}[what](data)
+     "ota": check_ota, "ident": check_ident}[what](data)
     if FAILS:
         for f in FAILS:
             print("  FAIL " + f)
