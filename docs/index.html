@@ -45,7 +45,7 @@ header.top{
 nav.top-links{display:flex;gap:16px;margin-left:auto;font-size:14px;color:var(--muted)}
 nav.top-links a{color:var(--muted)}
 nav.top-links a:hover{color:var(--txt);text-decoration:none}
-@media(max-width:760px){nav.top-links{display:none}}
+@media(max-width:900px){nav.top-links{display:none}}
 
 /* ---------- кнопки ---------- */
 .btn{
@@ -114,7 +114,7 @@ figcaption{margin-top:10px;font-size:13.5px;color:var(--muted)}
 figcaption b{color:var(--txt);font-weight:600}
 
 /* ---------- шаги ---------- */
-.steps{counter-reset:step;display:grid;gap:14px}
+.steps{counter-reset:step;display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
 .step{
   position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
   padding:18px 18px 18px 62px
@@ -127,7 +127,7 @@ figcaption b{color:var(--txt);font-weight:600}
 }
 .step h3{margin:0 0 6px;font-size:16px}
 .step p{margin:0;color:var(--muted);font-size:14.5px}
-.step pre{margin:10px 0 0}
+.step pre{margin:10px 0 0;max-width:100%}
 
 /* ---------- две колонки ---------- */
 .two{display:grid;grid-template-columns:1.1fr .9fr;gap:34px;align-items:center}
@@ -153,6 +153,44 @@ ul.ticks li b{color:var(--txt)}
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .note{font-size:13px;color:var(--muted);margin-top:14px}
 
+/* ---------- прошивка по USB из браузера ---------- */
+.flasher{
+  background:linear-gradient(180deg,var(--card),#101a2b);border:1px solid var(--line);
+  border-radius:18px;padding:22px
+}
+.flash-row{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+.flash-row label{
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;max-width:100%;
+  font-size:13.5px;color:var(--muted)
+}
+.flash-row select{
+  flex:1 1 150px;min-width:0;max-width:100%;
+  background:#0d1728;color:var(--txt);border:1px solid var(--line);border-radius:10px;
+  padding:11px 12px;font:inherit;font-size:14px
+}
+.btn[disabled]{opacity:.55;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+.flash-bar{
+  position:relative;height:10px;margin:18px 0 10px;border-radius:999px;overflow:hidden;
+  background:#0d1728;border:1px solid var(--line)
+}
+.flash-bar span{
+  display:block;height:100%;width:0;border-radius:999px;
+  background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width .2s ease
+}
+.flash-status{font-size:14.5px;color:#c6d3e8;min-height:22px}
+.flash-status.err{color:var(--warn)}
+.flash-status.ok{color:var(--accent);font-weight:600}
+.flash-log{
+  margin:14px 0 0;max-height:220px;overflow:auto;padding:12px 14px;border-radius:12px;
+  background:#08111e;border:1px solid var(--line);color:#9fb3d1;
+  font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  white-space:pre-wrap;word-break:break-word
+}
+details.flash-help{margin-top:16px;font-size:13.5px;color:var(--muted)}
+details.flash-help summary{cursor:pointer;color:var(--txt);font-weight:600;font-size:13.5px}
+details.flash-help ul{margin:10px 0 0;padding-left:20px;display:grid;gap:7px}
+details.flash-help b{color:var(--txt)}
+
 /* ---------- подвал ---------- */
 footer{padding:34px 0 50px;border-top:1px solid var(--line);color:var(--muted);font-size:13.5px}
 footer .wrap{display:flex;flex-wrap:wrap;gap:14px 28px;justify-content:space-between;align-items:center}
@@ -172,6 +210,7 @@ footer a:hover{color:var(--txt)}
       <a href="#features">Возможности</a>
       <a href="#screens">Экраны</a>
       <a href="#install">Установка</a>
+      <a href="#flash">Прошивка</a>
       <a href="#update">Обновление</a>
       <a href="#limits">Ограничения</a>
       <a href="https://github.com/max-fat/ESP8266-Autowatering2">GitHub</a>
@@ -314,7 +353,8 @@ footer a:hover{color:var(--txt)}
       </div>
       <div class="step">
         <h3>Прошейте плату</h3>
-        <p>ESP8266 подключается по USB. Команда для любого ПК с Python; на Windows проще
+        <p>ESP8266 подключается по USB — проще всего кнопкой в разделе <a href="#flash">«Прошивка»</a>,
+           браузер сделает всё сам. Любой другой способ: команда для ПК с Python; на Windows проще
            <i>NodeMCU-PyFlasher</i> — выбрать файл, адрес <code>0x00000</code>, скорость 921600.</p>
         <pre><code>pip install esptool
 esptool --chip esp8266 --port COM7 --baud 921600 \
@@ -331,6 +371,52 @@ esptool --chip esp8266 --port COM7 --baud 921600 \
     </div>
     <p class="note">Нужен ESP8266 с <b>4 МБ flash</b> (NodeMCU v3, Wemos D1 mini, ESP-12F-модули).
        Платы на 1 МБ прошивкой не поддерживаются.</p>
+  </div>
+</section>
+
+<section id="flash">
+  <div class="wrap">
+    <h2>Прошить по проводу прямо здесь</h2>
+    <p class="sub">
+      Кабель USB, плата ESP8266 с 4 МБ flash и браузер Chrome, Edge или Opera на компьютере.
+      Ни esptool, ни Python не нужны: браузер сам переводит плату в режим загрузчика,
+      пишет файл <code>autowatering-esp8266.bin</code> с адреса <code>0x00000</code>
+      и сверяет записанное по MD5.
+    </p>
+    <div class="flasher">
+      <div class="flash-row">
+        <button class="btn btn-primary" id="flashBtn" type="button">Подключить плату и прошить</button>
+        <label for="flashBaud">Скорость
+          <select id="flashBaud">
+            <option value="921600" selected>921600</option>
+            <option value="460800">460800</option>
+            <option value="115200">115200 — медленно, но надёжно</option>
+          </select>
+        </label>
+      </div>
+      <div class="flash-bar" id="flashBarWrap" role="progressbar"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Ход прошивки">
+        <span id="flashBar"></span>
+      </div>
+      <div class="flash-status" id="flashStatus" role="status" aria-live="polite">Проверяю браузер…</div>
+      <pre class="flash-log" id="flashLog" hidden></pre>
+      <details class="flash-help">
+        <summary>Если плата не отвечает</summary>
+        <ul>
+          <li><b>Драйвер USB-UART.</b> На Windows почти всегда нужен CH340 или CP210x — после установки
+              плата появится в «Диспетчере устройств» как COM-порт.</li>
+          <li><b>Режим загрузчика.</b> Зажмите <b>BOOT</b> (он же FLASH / GPIO0), нажмите и отпустите
+              <b>RST</b>, отпустите BOOT — и сразу нажмите «Подключить плату и прошить».</li>
+          <li><b>Порт занят.</b> Закройте монитор порта в Arduino IDE и PuTTY, отключите другие
+              вкладки с прошивалками: порт может открыть только одно место.</li>
+          <li><b>Питание.</b> Помпы и датчик уровня на время прошивки лучше обесточить — после записи
+              все выходы выключены.</li>
+          <li><b>Не вынимайте кабель</b> до сообщения «Готово»: прерванная запись оставит плату
+              без прошивки (лечится повторной прошивкой, но не перезагрузкой).</li>
+        </ul>
+      </details>
+      <p class="note" id="flashHint"></p>
+    </div>
   </div>
 </section>
 
@@ -457,6 +543,206 @@ esptool --chip esp8266 --port COM7 --baud 921600 \
     </div>
   </div>
 </footer>
+
+<script>
+/* Прошивка по USB: обвязка кнопки вокруг window.EspFlasher (docs/js/flasher.js). */
+(function () {
+  "use strict";
+
+  var btn = document.getElementById("flashBtn");
+  var baudSel = document.getElementById("flashBaud");
+  var bar = document.getElementById("flashBar");
+  var barWrap = document.getElementById("flashBarWrap");
+  var statusEl = document.getElementById("flashStatus");
+  var logEl = document.getElementById("flashLog");
+  var hintEl = document.getElementById("flashHint");
+  if (!btn || !statusEl) return;
+
+  var FW_URL = "firmware/autowatering-esp8266.bin";
+  var BUNDLE_URL = "js/flasher.js";
+  var MAX_LOG_LINES = 400;
+
+  function fwText(key, fallback) {
+    var el = document.querySelector('[data-fw="' + key + '"]');
+    return el && el.textContent.trim() ? el.textContent.trim() : fallback;
+  }
+  var FW_MD5 = fwText("md5", "");
+  var FW_VERSION = fwText("version", "");
+
+  var bytes = null;      // скачанный файл прошивки
+  var api = null;        // window.EspFlasher
+  var port = null;       // выбранный пользователем USB-порт
+  var busy = false;
+  var lines = [];
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text;
+    statusEl.className = "flash-status" + (kind ? " " + kind : "");
+  }
+  function setHint(text) { hintEl.textContent = text || ""; }
+  function setProgress(percent) {
+    var p = Math.max(0, Math.min(100, percent || 0));
+    bar.style.width = p + "%";
+    barWrap.setAttribute("aria-valuenow", String(Math.round(p)));
+  }
+  function log(line) {
+    var text = String(line == null ? "" : line).replace(/\s+$/, "");
+    if (!text) return;
+    lines.push(text);
+    if (lines.length > MAX_LOG_LINES) lines.splice(0, lines.length - MAX_LOG_LINES);
+    logEl.textContent = lines.join("\n");
+    logEl.hidden = false;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function loadBundle() {
+    if (window.EspFlasher) return Promise.resolve(window.EspFlasher);
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = BUNDLE_URL;
+      s.async = true;
+      s.onload = function () {
+        window.EspFlasher ? resolve(window.EspFlasher)
+                          : reject(new Error("прошивальщик не инициализировался"));
+      };
+      s.onerror = function () {
+        reject(new Error("не удалось загрузить " + BUNDLE_URL + " — проверьте соединение"));
+      };
+      document.head.appendChild(s);
+    });
+  }
+
+  function loadFirmware() {
+    return fetch(FW_URL, { cache: "no-store" }).then(function (resp) {
+      if (!resp.ok) {
+        throw new Error("файл прошивки не найден (" + resp.status + ") — скачайте его в разделе «Скачать»");
+      }
+      return resp.arrayBuffer();
+    }).then(function (buf) {
+      var data = new Uint8Array(buf);
+      if (!data.length) throw new Error("файл прошивки пустой");
+      var got = api.md5(data);
+      if (FW_MD5 && got !== FW_MD5) {
+        throw new Error("MD5 файла не совпал со страницей: " + got + " вместо " + FW_MD5);
+      }
+      log("Прошивка: " + Math.round(data.length / 1024) + " КБ, MD5 " + got + " — совпадает.");
+      return data;
+    });
+  }
+
+  function hintFor(message) {
+    if (/No port selected|cancel|отмен/i.test(message)) {
+      return "Порт не выбран: нажмите кнопку ещё раз и выберите плату в системном окне браузера.";
+    }
+    if (/not found|404|файл прошивки/i.test(message)) {
+      return "Файл прошивки не скачался. Возьмите его в разделе «Скачать» и прошейте через esptool.";
+    }
+    if (/MD5/i.test(message)) {
+      return "Файл при скачивании повредился. Обновите страницу (Ctrl+F5) и попробуйте снова.";
+    }
+    if (/не поддерживает|Web Serial/i.test(message)) {
+      return "Откройте страницу в Chrome, Edge или Opera на компьютере — в мобильных браузерах Web Serial нет.";
+    }
+    if (/timeout|timed out|sync|отвеч|Failed to connect/i.test(message)) {
+      return "Плата не отвечает: зажмите BOOT, нажмите RST, отпустите BOOT и повторите. " +
+             "Если не помогает — снизьте скорость до 115200.";
+    }
+    if (/open|busy|занят|NetworkError|InvalidState|break/i.test(message)) {
+      return "Порт занят или отвалился: закройте монитор порта в Arduino IDE и PuTTY, " +
+             "переподключите кабель и попробуйте снова.";
+    }
+    return "Попробуйте ещё раз со скоростью 115200 — на дешёвых USB-UART так надёжнее.";
+  }
+
+  function start() {
+    if (busy) return;
+    busy = true;
+    btn.disabled = true;
+    var oldLabel = btn.textContent;
+    btn.textContent = "Прошиваю…";
+    lines = [];
+    logEl.textContent = "";
+    logEl.hidden = true;
+    setProgress(0);
+    setHint("");
+
+    // Порт спрашиваем первым: браузер пускает к USB только сразу после нажатия кнопки.
+    setStatus("Выберите плату в окне браузера…");
+    var device = port || (window.EspFlasher && window.EspFlasher.requestPort
+      ? window.EspFlasher.requestPort()
+      : navigator.serial.requestPort());
+
+    Promise.resolve(device)
+      .then(function (chosen) {
+        port = chosen;
+        log("Порт выбран.");
+        setStatus("Готовлю прошивальщик…");
+        return loadBundle();
+      })
+      .then(function (flasher) {
+        api = flasher;
+        if (bytes) return bytes;
+        setStatus("Скачиваю файл прошивки…");
+        return loadFirmware().then(function (data) { bytes = data; return data; });
+      })
+      .then(function (data) {
+        var baud = parseInt(baudSel && baudSel.value, 10) || 921600;
+        setStatus("Подключаюсь к плате на " + baud + " бод…");
+        log("Скорость: " + baud);
+        return api.flash({
+          data: data,
+          port: port,
+          baudrate: baud,
+          onLog: log,
+          onChip: function (chip) { log("Чип: " + chip); },
+          onProgress: function (written, total) {
+            var percent = total ? (written / total) * 100 : 0;
+            setProgress(percent);
+            setStatus("Запись: " + Math.round(percent) + "% · " +
+                      Math.round(written / 1024) + " из " + Math.round(total / 1024) + " КБ");
+          }
+        });
+      })
+      .then(function () {
+        setProgress(100);
+        setStatus("Готово: прошивка записана и проверена, плата перезагрузилась.", "ok");
+        setHint("Подключитесь к сети AutoWater-XXXXXX, откройте 192.168.4.1 и настройте домашний Wi-Fi — " +
+                "дальше обновления ставятся по воздуху из раздела «Настройки».");
+      })
+      .catch(function (err) {
+        var message = (err && err.message) ? err.message : String(err);
+        setProgress(0);
+        setStatus("Не получилось: " + message, "err");
+        log("ОШИБКА: " + message);
+        setHint(hintFor(message));
+      })
+      .then(function () {
+        busy = false;
+        btn.disabled = false;
+        btn.textContent = oldLabel;
+      });
+  }
+
+  var hasSerial = typeof navigator !== "undefined" && !!navigator.serial;
+  if (!hasSerial) {
+    btn.disabled = true;
+    setStatus("Этот браузер не умеет работать с USB-портом.", "err");
+    setHint("Прошивка из браузера доступна в Chrome, Edge и Opera на компьютере " +
+            "(мобильные браузеры Web Serial не поддерживают). Можно прошить файл через esptool — " +
+            "команда есть в разделе «Установка».");
+  } else if (!window.isSecureContext) {
+    btn.disabled = true;
+    setStatus("Страница открыта по http://, а Web Serial работает только на https.", "err");
+    setHint("Откройте страницу по адресу https://max-fat.github.io/ESP8266-Autowatering2/ " +
+            "или по http://localhost, если запускаете её у себя.");
+  } else {
+    setStatus("Плата не подключена.");
+    setHint("Прошивается версия " + FW_VERSION + " — тот же файл, что в разделе «Скачать»; " +
+            "перед записью его MD5 сверяется с указанным на странице.");
+    btn.addEventListener("click", start);
+  }
+})();
+</script>
 
 </body>
 </html>
