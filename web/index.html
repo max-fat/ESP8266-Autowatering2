@@ -106,6 +106,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .scanrow:hover{background:#132238}
 .scanrow .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scanrow .rs{color:var(--muted);font-size:12px;white-space:nowrap;font-weight:500}
+.scanrow .rs svg{width:11px;height:11px;margin-right:3px;vertical-align:-1px;fill:currentColor}
 .scanrow.sel{background:#14304d}
 .toast{
   position:fixed;left:50%;bottom:18px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
@@ -116,6 +117,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .toast.err{border-color:#6b2430;background:#2a1218;color:#ffc9c9}
 .filein{padding:9px;border:1px dashed var(--line);border-radius:10px;background:#0d1728;
   color:var(--txt);font-size:13px;max-width:100%}
+.filein::file-selector-button,.filein::-webkit-file-upload-button{
+  margin-right:10px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);
+  background:var(--card2);color:var(--txt);font-size:13px;font-weight:600;cursor:pointer}
 .otaprog{display:none;height:8px;margin-top:12px;border-radius:999px;overflow:hidden;
   background:#0d1728;border:1px solid var(--line)}
 .otaprog.show{display:block}
@@ -126,7 +130,15 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .kv div:nth-child(even){min-width:0;overflow-wrap:anywhere}
 .sep{height:1px;background:var(--line);margin:14px 0}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-@media(max-width:520px){.clock{font-size:19px}.row2{grid-template-columns:1fr}}
+@media(max-width:520px){
+  .clock{font-size:19px}
+  .row2{grid-template-columns:1fr}
+  /* На телефоне поля идут в одну колонку, а «Сканировать» не отбирает место
+     у поля SSID (иначе оно сжимается в несколько пикселей). */
+  .grid{grid-template-columns:1fr}
+  .inrow{flex-wrap:wrap}
+  .inrow input,.inrow button{flex:1 1 100%}
+}
 </style>
 </head>
 <body>
@@ -508,6 +520,12 @@ async function startScan(){
   scanTimer = setTimeout(tick, 700);
 }
 
+/* Замок для закрытых сетей: эмодзи 🔒 в разных системах выглядит по-разному
+   (а где-то его нет вовсе), поэтому рисуем значок сами. */
+const LOCK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+  '<path d="M12 2a5 5 0 0 0-5 5v2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm3 7H9V7a3 3 0 0 1 6 0v2z"/>' +
+  '</svg>';
+
 function renderScan(nets){
   const box = $('scanList');
   if(!box) return;
@@ -522,7 +540,7 @@ function renderScan(nets){
     return '<button type="button" class="scanrow' + (n.ssid === cur ? ' sel' : '') + '" data-ssid="' +
       escHtml(n.ssid) + '" data-sec="' + sec + '">' +
       '<span class="nm">' + escHtml(n.ssid) + '</span>' +
-      '<span class="rs">' + (sec ? '🔒 ' : '') + n.rssi + ' дБм</span></button>';
+      '<span class="rs">' + (sec ? LOCK_SVG : '') + n.rssi + ' дБм</span></button>';
   }).join('');
   box.querySelectorAll('button.scanrow').forEach(b=>{
     b.addEventListener('click', ()=> pickSsid(b.dataset.ssid, b.dataset.sec === '1'));
@@ -543,10 +561,23 @@ function pickSsid(ssid, secured){
 document.querySelectorAll('nav.tabs button').forEach(b=>{
   b.addEventListener('click', ()=> selectTab(b.dataset.tab));
 });
-function selectTab(name){
+const TABS = ['tasks', 'channels', 'settings'];
+
+/* Вкладка запоминается в адресе (#tasks / #channels / #settings): так на
+   нужный экран можно дать ссылку, а скриншоты в docs/ снимаются прямо с него. */
+function selectTab(name, pushHash){
+  if(TABS.indexOf(name) < 0) name = 'tasks';
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
   document.querySelectorAll('main section').forEach(s=>s.classList.toggle('active', s.id==='tab-'+name));
+  if(pushHash !== false && location.hash !== '#' + name){ location.hash = name; }
 }
+
+function tabFromHash(){
+  const h = (location.hash || '').replace('#','');
+  return TABS.indexOf(h) >= 0 ? h : '';
+}
+
+window.addEventListener('hashchange', ()=>{ const t = tabFromHash(); if(t) selectTab(t, false); });
 
 /* ---------- шапка ---------- */
 function renderHeader(){
@@ -1145,11 +1176,12 @@ async function load(){
 
   if(!st.wifi.configured && !window._autoSetup){
     window._autoSetup = true;
-    selectTab('settings');
+    selectTab('settings', false);
   }
 }
 
 buildTzOptions();
+if(tabFromHash()) selectTab(tabFromHash(), false);
 load();
 setInterval(load, 2000);
 </script>
