@@ -20,6 +20,7 @@ run: test_logic
 	@./test_logic --dump-config | python3 check_json.py config
 	@./test_logic --dump-export | python3 check_json.py export
 	@./test_logic --dump-ota    | python3 check_json.py ota
+	@./test_logic --dump-ident  | python3 check_json.py ident
 
 clean:
 	rm -f test_logic

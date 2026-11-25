@@ -24,7 +24,7 @@ const PAGE = fs.readFileSync(path.join(ROOT, 'web', 'index.html'), 'utf8');
 /* ---------- данные для макетов ---------- */
 function stationState(over) {
   return Object.assign({
-    fw: '1.6.1', appName: 'ESP8266-Autowatering2', name: 'Теплица',
+    fw: '1.6.2', appName: 'ESP8266-Autowatering2', name: 'Теплица',
     now: 1795000000, time: '08:12:40', date: '24.11.2026', timeValid: 1, timeSrc: 'ntp', tz: 180,
     wifi: {
       mode: 'sta', configured: 1, connected: 1, ip: '192.168.1.50', rssi: -58,
@@ -96,6 +96,20 @@ function buildPage(state, cfg, extra) {
       if (u.indexOf('/api/ota') === 0)    return { ok: true, json: async () => ({
         fw: STATE.fw, state: 0, stateText: 'idle', received: 0, total: 0,
         maxSize: 724992, minSize: 32768, freeHeap: STATE.heap, err: '' }) };
+      if (u.indexOf('build-info.txt') >= 0) return { ok: true, text: async () => 'version  : 1.6.2' };
+      if (u.indexOf('/api/ident') >= 0) {
+        // Соседние модули для кадра «Другие модули в сети»: поиск идёт по сети,
+        // поэтому отвечаем только адресам из этого списка.
+        const ip = u.split('//').pop().split('/')[0].split(':')[0];
+        const NETS = {
+          '192.168.1.50': { name: STATE.name, fw: STATE.fw },
+          '192.168.1.61': { name: 'Балкон', fw: '1.6.1' },
+          '192.168.1.77': { name: '', fw: '1.6.1' }
+        };
+        const d = NETS[ip];
+        if (d) return { ok: true, json: async () => ({ app: 'autowatering', fw: d.fw, name: d.name, ch: 4, ip }) };
+        return { ok: false, status: 404, json: async () => ({}) };
+      }
       return { ok: true, json: async () => ({ ok: true }) };
     };
     ${extra || ''}
@@ -148,6 +162,10 @@ const SHOTS = [
     title: 'Карточка обновления (крупным планом)'
   },
   {
+    file: 'fleet.png', tab: 'settings', element: '#fleetCard', action: 'fleetScan',
+    title: 'Другие модули в сети: поиск и обновление'
+  },
+  {
     file: 'hero.png', tab: 'tasks', wide: true,
     title: 'Общий вид (десктоп)'
   }
@@ -187,6 +205,14 @@ const SHOTS = [
       await new Promise(r => setTimeout(r, 120));
     }
 
+    if (shot.action === 'fleetScan') {
+      // Поиск по сети: подсеть берём из адреса модуля в макете.
+      await page.evaluate(() => { document.getElementById('fleetNet').value = '192.168.1'; });
+      await page.click('#btnFleetScan');
+      await page.waitForFunction(() => document.querySelectorAll('#fleetList .fleetrow').length >= 3);
+      await new Promise(r => setTimeout(r, 200));
+    }
+
     if (shot.action === 'scan') {
       await page.click('#btnScan');
       await page.waitForFunction(() => document.querySelectorAll('#scanList .scanrow').length > 1);
@@ -208,6 +234,9 @@ const SHOTS = [
       }, shot.element);
       const el = handle.asElement();
       if (el) {
+        // Липкая шапка иначе закрывает верх карточки: отводим страницу на её высоту.
+        await page.evaluate(() => window.scrollBy(0, -70));
+        await new Promise(r => setTimeout(r, 120));
         await el.screenshot({ path: path.join(OUT, shot.file) });
       } else {
         await page.screenshot({ path: path.join(OUT, shot.file) });

@@ -28,6 +28,29 @@ const char* stop_reason_str(uint8_t reason) {
   }
 }
 
+/*
+ * Визитка модуля — самая короткая из всех ручек (см. webjson_ident ниже,
+ * её читает сканер соседних модулей на странице проекта и в интерфейсе).
+ * Идентификатор "app" нужен, чтобы сканер не путал чужие сервера в сети
+ * с автополивом: поле проверяется на стороне браузера.
+ */
+String webjson_ident() {
+  String j;
+  j.reserve(140);
+
+  char nameEsc[MODULE_NAME_MAX * 6 + 1];
+  text_json_escape(g_store.cfg.name, nameEsc, sizeof(nameEsc));
+
+  j += F("{\"app\":\"autowatering\",\"fw\":\"" FW_VERSION "\",\"name\":\"");
+  j += nameEsc;
+  j += F("\",\"ch\":");
+  j += String((int)NUM_CHANNELS);
+  j += F(",\"ip\":\"");
+  j += net_connected() ? net_ip() : net_ap_ip();
+  j += F("\"}");
+  return j;
+}
+
 String webjson_state() {
   String j;
   j.reserve(1800);

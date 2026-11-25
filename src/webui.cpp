@@ -39,8 +39,23 @@ static bool arg_bool(const char* name, bool defVal) {
   return n != 0;
 }
 
+/*
+ * CORS: к API обращается не только страница самого модуля, но и чужие
+ * страницы из той же сети — страница проекта (прошивка по USB) и интерфейс
+ * соседнего модуля (сканер и обновление по сети). Без этих заголовков браузер
+ * отдаст запросу «пустой» ответ, и сканер увидит сеть без модулей.
+ *
+ * Access-Control-Allow-Private-Network — для Chrome: он спрашивает разрешение
+ * на запрос к частным адресам (192.168.*) из «публичной» страницы.
+ */
+static void send_cors() {
+  s_server.sendHeader("Access-Control-Allow-Origin", "*");
+  s_server.sendHeader("Access-Control-Allow-Private-Network", "true");
+}
+
 static void send_json(int code, const String& body) {
   s_server.sendHeader("Cache-Control", "no-store");
+  send_cors();
   s_server.send(code, "application/json; charset=utf-8", body);
 }
 
@@ -76,6 +91,12 @@ static void handle_index() {
 
 static void handle_state() {
   send_json(200, webjson_state());
+}
+
+// Визитка для сканера соседних модулей: имя, версия, адрес. Короткая нарочно —
+// при поиске по сети таких запросов 254 штуки.
+static void handle_ident() {
+  send_json(200, webjson_ident());
 }
 
 static void handle_config_get() {
@@ -522,6 +543,17 @@ static void handle_reboot() {
 }
 
 static void handle_not_found() {
+  // Предварительный запрос браузера (preflight) перед кросс-доменным POST:
+  // например, загрузка прошивки на соседний модуль со страницы проекта.
+  if (s_server.method() == HTTP_OPTIONS) {
+    send_cors();
+    s_server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    s_server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    s_server.sendHeader("Access-Control-Max-Age", "600");
+    s_server.send(204, "text/plain", "");
+    return;
+  }
+
   String uri = s_server.uri();
   if (uri.startsWith("/api/")) {
     send_err(404, "not_found");
@@ -543,6 +575,7 @@ void webui_begin() {
   s_server.on("/favicon.ico", HTTP_GET, []() { s_server.send(204, "text/plain", ""); });
 
   s_server.on("/api/state", HTTP_GET, handle_state);
+  s_server.on("/api/ident", HTTP_GET, handle_ident);
   s_server.on("/api/config", HTTP_GET, handle_config_get);
   s_server.on("/api/config", HTTP_POST, handle_config_save);
   s_server.on("/api/task", HTTP_POST, handle_task_save);

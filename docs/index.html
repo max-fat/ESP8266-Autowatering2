@@ -45,7 +45,8 @@ header.top{
 nav.top-links{display:flex;gap:16px;margin-left:auto;font-size:14px;color:var(--muted)}
 nav.top-links a{color:var(--muted)}
 nav.top-links a:hover{color:var(--txt);text-decoration:none}
-@media(max-width:900px){nav.top-links{display:none}}
+/* Пунктов в меню восемь: ниже 1000 px они не влезают в строку с кнопкой. */
+@media(max-width:999px){nav.top-links{display:none}}
 
 /* ---------- кнопки ---------- */
 .btn{
@@ -180,6 +181,32 @@ ul.ticks li b{color:var(--txt)}
 .flash-status{font-size:14.5px;color:#c6d3e8;min-height:22px}
 .flash-status.err{color:var(--warn)}
 .flash-status.ok{color:var(--accent);font-weight:600}
+/* ---------- модули в сети ---------- */
+.flash-row input{
+  flex:1 1 140px;min-width:0;max-width:100%;margin:0;
+  background:#0d1728;color:var(--txt);border:1px solid var(--line);border-radius:10px;
+  padding:11px 12px;font:inherit;font-size:14px
+}
+.flash-row input:focus,.flash-row select:focus{outline:none;border-color:#2f5c8f}
+.flash-row input[type=file]{
+  padding:8px;font-size:13px;color:var(--muted);border-style:dashed;background:#0c1524
+}
+.fleetlist{margin-top:14px;display:grid;gap:10px}
+.fleetrow{
+  display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 14px
+}
+.fleetrow .nm{font-weight:700;font-size:15px}
+.fleetrow .meta{font-size:12.5px;color:var(--muted);margin-top:3px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.fleetrow .tag{
+  display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:11.5px;
+  font-weight:700;vertical-align:1px
+}
+.fleetrow .tag.now{color:#7ef0b0;border:1px solid #1d5c3b;background:#0e2a1d}
+.fleetrow .tag.old{color:#ffe0a8;border:1px solid #664c14;background:#2a2110}
+.fleetrow .tag.mine{color:#bfe0ff;border:1px solid #1d4a76;background:#14304d}
+.fleetrow .btn{padding:9px 14px;font-size:13.5px;border-radius:10px}
 .flash-log{
   margin:14px 0 0;max-height:220px;overflow:auto;padding:12px 14px;border-radius:12px;
   background:#08111e;border:1px solid var(--line);color:#9fb3d1;
@@ -211,6 +238,7 @@ footer a:hover{color:var(--txt)}
       <a href="#screens">Экраны</a>
       <a href="#install">Установка</a>
       <a href="#flash">Прошивка</a>
+      <a href="#fleet">Модули</a>
       <a href="#update">Обновление</a>
       <a href="#limits">Ограничения</a>
       <a href="https://github.com/max-fat/ESP8266-Autowatering2">GitHub</a>
@@ -239,7 +267,7 @@ footer a:hover{color:var(--txt)}
         <a class="btn btn-ghost" href="https://github.com/max-fat/ESP8266-Autowatering2">Исходники на GitHub</a>
       </div>
       <p class="meta">
-        Версия <b data-fw="version">1.6.1</b> · <b data-fw="size">315 КБ</b> · один файл <code>.bin</code> ·
+        Версия <b data-fw="version">1.6.2</b> · <b data-fw="size">319 КБ</b> · один файл <code>.bin</code> ·
         NodeMCU / Wemos D1 mini, 4 МБ flash
       </p>
     </div>
@@ -298,6 +326,13 @@ footer a:hover{color:var(--txt)}
            удобно клонировать конфигурацию на второй контроллер.</p>
       </div>
       <div class="feature">
+        <svg viewBox="0 0 24 24"><path d="M4 6h5V4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5v-2H4V6zm16-2h-5v2h5v12h-5v2h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM9 11h6v2H9v-2zm3-6-4 4h3v2h2V9h3l-4-4z"/></svg>
+        <h3>Обновление всех модулей разом</h3>
+        <p>Несколько контроллеров в доме находят друг друга по сети: видно их имена и версии,
+           а прошивку можно отправить выбранному по Wi-Fi — со страницы проекта или из интерфейса
+           любого модуля.</p>
+      </div>
+      <div class="feature">
         <svg viewBox="0 0 24 24"><path d="M8 3h8l-1 6h4l-9 12 2-9H6l2-9z"/></svg>
         <h3>Открытый код</h3>
         <p>C++11, Arduino core 2.4.2, без облачных зависимостей. Собирается скриптом
@@ -348,8 +383,8 @@ footer a:hover{color:var(--txt)}
     <div class="steps">
       <div class="step">
         <h3>Скачайте прошивку</h3>
-        <p>Файл <code>autowatering-esp8266.bin</code> — версия <b data-fw="version">1.6.1</b>,
-           <b data-fw="size">315 КБ</b>. Ссылка ведёт на страницу релизов, там же лежат прошлые версии.</p>
+        <p>Файл <code>autowatering-esp8266.bin</code> — версия <b data-fw="version">1.6.2</b>,
+           <b data-fw="size">319 КБ</b>. Ссылка ведёт на страницу релизов, там же лежат прошлые версии.</p>
       </div>
       <div class="step">
         <h3>Прошейте плату</h3>
@@ -417,6 +452,59 @@ esptool --chip esp8266 --port COM7 --baud 921600 \
       </details>
       <p class="note" id="flashHint"></p>
     </div>
+  </div>
+</section>
+
+<section id="fleet">
+  <div class="wrap two">
+    <div>
+    <h2>Обновить модули в сети</h2>
+    <p class="sub">
+      Страница находит в домашней сети уже прошитые автополивы и обновляет выбранный — по Wi-Fi,
+      без кабеля и без похода к каждому модулю. Видны модули на прошивке <b>1.6.2</b> и новее:
+      в ней появились визитка <code>/api/ident</code> и разрешение на запросы с чужой страницы.
+    </p>
+    <div class="flasher">
+      <div class="flash-row">
+        <label for="fleetNet">Сеть или адрес
+          <input id="fleetNet" type="text" inputmode="decimal" maxlength="21"
+                 placeholder="192.168.1" autocomplete="off" spellcheck="false">
+        </label>
+        <button class="btn btn-primary" id="btnFleetScan" type="button">Искать модули</button>
+        <button class="btn btn-ghost" id="btnFleetFile" type="button">Свой .bin</button>
+        <input id="fleetFile" type="file" accept=".bin,application/octet-stream" hidden>
+      </div>
+      <div class="flash-bar" id="fleetBarWrap" role="progressbar"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Ход обновления">
+        <span id="fleetBar"></span>
+      </div>
+      <div class="flash-status" id="fleetStatus" role="status" aria-live="polite">Поиск ещё не запускали.</div>
+      <div class="fleetlist" id="fleetList"></div>
+      <pre class="flash-log" id="fleetLog" hidden></pre>
+      <details class="flash-help">
+        <summary>Если модули не находятся</summary>
+        <ul>
+          <li><b>Версия прошивки.</b> Модули старше 1.6.2 сканеру не отвечают — обновите их с их
+              собственной страницы («Настройки» → «Обновление прошивки»), дальше они найдутся сами.</li>
+          <li><b>Другая сеть.</b> Модуль и компьютер должны быть в одной сети 2.4 ГГц; гостевые сети
+              и VLAN соседей друг друга не видят.</li>
+          <li><b>Браузер блокирует запросы к локальной сети.</b> Chrome спрашивает разрешение —
+              нажмите «Разрешить». Если страница открыта по <code>https</code>, а модули по
+              <code>http</code>, браузер может отказать совсем: тогда откройте интерфейс любого
+              модуля по его адресу — в «Настройках» есть тот же сканер.</li>
+          <li><b>Своя копия .bin</b> нужна, если у модулей нет интернета: файл прошивки можно
+              выбрать вручную, тогда он берётся не из репозитория.</li>
+        </ul>
+      </details>
+      <p class="note" id="fleetHint"></p>
+    </div>
+    </div>
+    <figure class="cardshot">
+      <img src="img/fleet.png" width="736" height="1092" loading="lazy"
+        alt="Карточка «Другие модули в сети»: найденные модули с именами, адресами и версиями, кнопка «Обновить»">
+      <figcaption>Тот же сканер в интерфейсе модуля: «Настройки» → «Другие модули в сети».
+        Он выручает, когда браузер не пускает https-страницу к модулям по http.</figcaption>
+    </figure>
   </div>
 </section>
 
@@ -504,12 +592,12 @@ esptool --chip esp8266 --port COM7 --baud 921600 \
     <p class="sub">Один файл — вся прошивка: загрузчик, интерфейс и код.</p>
     <div class="release">
       <div>
-        <div class="v">Автополив <span data-fw="version">1.6.1</span></div>
+        <div class="v">Автополив <span data-fw="version">1.6.2</span></div>
         <div class="note">Прошивка для ESP8266 с 4 МБ flash. Прошивается одним файлом с адреса <code>0x00000</code>.</div>
       </div>
       <dl>
-        <div class="item">Размер <b data-fw="size">315 КБ</b></div>
-        <div class="item">MD5 <b data-fw="md5">8f325ad888e6ef5ce3805e44dca62df8</b></div>
+        <div class="item">Размер <b data-fw="size">319 КБ</b></div>
+        <div class="item">MD5 <b data-fw="md5">aa9b30c64143e6475c6e0ce5c3895d55</b></div>
         <div class="item">Собрано <b data-fw="date">2026-11-25</b></div>
       </dl>
       <div class="cta" style="margin:0">
@@ -532,7 +620,7 @@ esptool --chip esp8266 --port COM7 --baud 921600 \
 <footer>
   <div class="wrap">
     <div>
-      Автополив на ESP8266 · версия <span data-fw="version">1.6.1</span> ·
+      Автополив на ESP8266 · версия <span data-fw="version">1.6.2</span> ·
       <a href="https://github.com/max-fat/ESP8266-Autowatering2">исходники</a> ·
       <a href="https://github.com/max-fat/ESP8266-Autowatering2/issues">вопросы и идеи</a>
     </div>
@@ -741,6 +829,317 @@ esptool --chip esp8266 --port COM7 --baud 921600 \
             "перед записью его MD5 сверяется с указанным на странице.");
     btn.addEventListener("click", start);
   }
+})();
+</script>
+
+<script>
+/* Модули в сети: поиск соседних автополивов и обновление выбранного по Wi-Fi. */
+(function () {
+  "use strict";
+
+  var netEl = document.getElementById("fleetNet");
+  var scanBtn = document.getElementById("btnFleetScan");
+  var fileEl = document.getElementById("fleetFile");
+  var bar = document.getElementById("fleetBar");
+  var barWrap = document.getElementById("fleetBarWrap");
+  var statusEl = document.getElementById("fleetStatus");
+  var listEl = document.getElementById("fleetList");
+  var logEl = document.getElementById("fleetLog");
+  var hintEl = document.getElementById("fleetHint");
+  if (!netEl || !scanBtn || !statusEl) return;
+
+  var FW_URL = "firmware/autowatering-esp8266.bin";
+  var verEl = document.querySelector('[data-fw="version"]');
+  var LATEST = verEl ? verEl.textContent.trim() : "";
+
+  var found = [];
+  var busy = false;
+  var lines = [];
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text;
+    statusEl.className = "flash-status" + (kind ? " " + kind : "");
+  }
+  function setHint(text) { hintEl.textContent = text || ""; }
+  function setProgress(percent) {
+    var p = Math.max(0, Math.min(100, percent || 0));
+    bar.style.width = p + "%";
+    barWrap.setAttribute("aria-valuenow", String(Math.round(p)));
+  }
+  function log(line) {
+    lines.push(String(line));
+    if (lines.length > 200) lines.splice(0, lines.length - 200);
+    logEl.textContent = lines.join("\n");
+    logEl.hidden = false;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function esc(text) {
+    return String(text == null ? "" : text).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  function base(dev) {
+    return "http://" + dev.host + (dev.port && dev.port !== 80 ? ":" + dev.port : "");
+  }
+
+  /* «192.168.1» — вся подсеть, «192.168.1.7» или «192.168.1.7:8080» — один адрес.
+     Порт можно указать и для подсети: «192.168.1:8080». */
+  function targets(spec) {
+    var value = String(spec || "").trim();
+    var net = value.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d+))?$/);
+    if (net) {
+      var hosts = [];
+      for (var i = 1; i <= 254; i++) hosts.push(net[1] + "." + i);
+      return { hosts: hosts, port: parseInt(net[2] || "80", 10) || 80 };
+    }
+    var one = value.match(/^([A-Za-z0-9._-]+)(?::(\d+))?$/);
+    if (one) return { hosts: [one[1]], port: parseInt(one[2] || "80", 10) || 80 };
+    return { hosts: [], port: 80 };
+  }
+
+  function guessNet() {
+    var m = (location.hostname || "").match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/);
+    return m ? m[1] : "";
+  }
+
+  function markBusy(on) {
+    busy = !!on;
+    scanBtn.disabled = busy;
+    scanBtn.textContent = busy ? "Идёт обновление…" : "Искать модули";
+    var buttons = listEl.querySelectorAll("button[data-dev]");
+    for (var i = 0; i < buttons.length; i++) buttons[i].disabled = busy;
+  }
+
+  function render() {
+    var mine = "";
+    listEl.innerHTML = found.map(function (dev, idx) {
+      var tag = "";
+      if (dev.fw && LATEST && dev.fw === LATEST) tag = '<span class="tag now">актуально</span>';
+      else if (dev.fw && LATEST) tag = '<span class="tag old">можно обновить до ' + esc(LATEST) + "</span>";
+      return '<div class="fleetrow" data-row="' + idx + '">' +
+        '<div><div class="nm">' + esc(dev.name || "Автополив") + tag + "</div>" +
+        '<div class="meta">' + esc(dev.ip) + " · прошивка " + esc(dev.fw || "?") + "</div></div>" +
+        '<button class="btn btn-ghost btn-sm" type="button" data-dev="' + idx + '">Обновить</button>' +
+        "</div>";
+    }).join("");
+
+    var buttons = listEl.querySelectorAll("button[data-dev]");
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener("click", function () {
+        update(found[parseInt(this.getAttribute("data-dev"), 10)]);
+      });
+    }
+    markBusy(busy);
+  }
+
+  function scan() {
+    if (busy) return;
+    var t = targets(netEl.value);
+    if (!t.hosts.length) {
+      setStatus("Укажите сеть вида 192.168.1 или адрес модуля.", "err");
+      return;
+    }
+
+    markBusy(true);
+    found = [];
+    listEl.innerHTML = "";
+    setHint("");
+    setProgress(0);
+    setStatus("Ищу модули… 0 из " + t.hosts.length);
+
+    var queue = t.hosts.slice();
+    var done = 0;
+
+    function worker() {
+      if (!queue.length) return Promise.resolve();
+      var host = queue.shift();
+      var url = "http://" + host + (t.port !== 80 ? ":" + t.port : "") + "/api/ident";
+      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      var timer = ctl ? setTimeout(function () { ctl.abort(); }, 1500) : null;
+      return fetch(url, { cache: "no-store", mode: "cors", signal: ctl ? ctl.signal : undefined })
+        .then(function (resp) {
+          if (!resp.ok) return null;
+          return resp.json().then(function (j) {
+            if (j && j.app === "autowatering") {
+              found.push({
+                host: host,
+                port: t.port,
+                ip: j.ip || host,
+                name: j.name || "",
+                fw: j.fw || "",
+                own: false
+              });
+            }
+          });
+        })
+        .catch(function () { /* адрес свободен или это не автополив */ })
+        .then(function () {
+          if (timer) clearTimeout(timer);
+          done++;
+          if (done % 8 === 0 || done === t.hosts.length) {
+            setStatus("Ищу модули… " + done + " из " + t.hosts.length);
+          }
+          return worker();
+        });
+    }
+
+    var workers = [];
+    for (var i = 0; i < Math.min(32, t.hosts.length); i++) workers.push(worker());
+
+    Promise.all(workers).then(function () {
+      markBusy(false);
+      found.sort(function (a, b) {
+        return (a.name || "").localeCompare(b.name || "") || a.host.localeCompare(b.host);
+      });
+      render();
+      if (found.length) {
+        setStatus("Найдено модулей: " + found.length +
+                  (LATEST ? " · в репозитории версия " + LATEST : ""), "ok");
+        setHint("Обновление идёт по Wi-Fi тем же способом, что и со страницы модуля: файл " +
+                FW_URL + " уходит на адрес выбранного модуля. Полив на нём останавливается, " +
+                "настройки и задачи сохраняются.");
+      } else {
+        setStatus("Модулей не найдено.", "err");
+        if (location.protocol === "https:") {
+          setHint("Похоже, браузер не пустил https-страницу к модулям по http — это его правило " +
+                  "безопасности. Откройте интерфейс модуля по его адресу: в «Настройках» есть тот же сканер. " +
+                  "Или откройте эту страницу локально по http:// (например, python3 -m http.server -d docs 8000).");
+        } else {
+          setHint("Проверьте, что модули в этой же сети 2.4 ГГц и прошиты 1.6.2 или новее.");
+        }
+      }
+    }).catch(function (err) {
+      markBusy(false);
+      setStatus("Поиск не удался: " + (err && err.message ? err.message : err), "err");
+    });
+  }
+
+  /* Файл прошивки: свой из поля или со страницы (docs/firmware/...). */
+  function firmware() {
+    var chosen = fileEl.files && fileEl.files[0];
+    if (chosen) {
+      log("Прошивка из файла: " + chosen.name + " · " + Math.round(chosen.size / 1024) + " КБ");
+      return Promise.resolve(chosen);
+    }
+    return fetch(FW_URL, { cache: "no-store" }).then(function (resp) {
+      if (!resp.ok) throw new Error("не удалось скачать файл прошивки (HTTP " + resp.status + ")");
+      return resp.blob();
+    }).then(function (blob) {
+      if (blob.size < 32 * 1024) throw new Error("скачался не файл прошивки");
+      log("Прошивка со страницы: " + Math.round(blob.size / 1024) + " КБ");
+      return blob;
+    });
+  }
+
+  function upload(dev, blob) {
+    return new Promise(function (resolve, reject) {
+      var fd = new FormData();
+      fd.append("firmware", blob, "autowatering-esp8266.bin");
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", base(dev) + "/api/ota");
+      xhr.upload.onprogress = function (e) {
+        if (!e.lengthComputable) return;
+        var percent = (e.loaded / e.total) * 100;
+        setProgress(percent);
+        setStatus("Отправка на " + dev.ip + ": " + Math.round(percent) + "% · не закрывайте страницу");
+      };
+      xhr.onload = function () {
+        var r = {};
+        try { r = JSON.parse(xhr.responseText || "{}"); } catch (e) {}
+        if (xhr.status === 200 && r.ok) resolve(r);
+        else reject(new Error(r.error || ("HTTP " + xhr.status)));
+      };
+      xhr.onerror = function () {
+        reject(new Error("связь оборвалась — модуль мог перезагрузиться раньше времени"));
+      };
+      xhr.send(fd);
+    });
+  }
+
+  function waitReboot(dev, oldFw) {
+    var started = Date.now();
+    return new Promise(function (resolve) {
+      function tick() {
+        if (Date.now() - started > 120000) { resolve(false); return; }
+        setTimeout(function () {
+          fetch(base(dev) + "/api/ident", { cache: "no-store", mode: "cors" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+              if (j && j.app === "autowatering" && j.fw && j.fw !== oldFw) {
+                dev.fw = j.fw;
+                dev.name = j.name || dev.name;
+                resolve(true);
+              } else {
+                tick();
+              }
+            })
+            .catch(tick);
+        }, 2000);
+      }
+      tick();
+    });
+  }
+
+  function update(dev) {
+    if (!dev || busy) return;
+    if (!window.confirm("Обновить модуль «" + (dev.name || "Автополив") + "» (" + dev.ip + ")?\n\n" +
+                        "Полив на нём остановится, модуль перезагрузится. Настройки и задачи сохранятся.")) return;
+
+    markBusy(true);
+    setProgress(0);
+    lines = [];
+    logEl.textContent = "";
+    logEl.hidden = true;
+    setHint("");
+    setStatus("Готовлю прошивку…");
+
+    firmware()
+      .then(function (blob) {
+        setStatus("Отправляю " + Math.round(blob.size / 1024) + " КБ на " + dev.ip + "…");
+        return upload(dev, blob);
+      })
+      .then(function () {
+        setProgress(100);
+        setStatus("Прошивка принята модулем " + dev.ip + ". Ждём перезагрузку…");
+        log("Модуль " + dev.ip + " принял файл, ждём новую версию");
+        return waitReboot(dev, dev.fw);
+      })
+      .then(function (ok) {
+        if (ok) {
+          setStatus("Готово: модуль " + dev.ip + " обновился до " + dev.fw + ".", "ok");
+          setHint("Модуль перезагрузился и работает на новой прошивке. Настройки, задачи и имена каналов сохранились.");
+        } else {
+          setStatus("Модуль " + dev.ip + " не ответил за 2 минуты.", "err");
+          setHint("Проверьте питание модуля и обновите страницу. Если прошивка не принялась, модуль " +
+                  "остался на прежней версии — обновление можно повторить.");
+        }
+      })
+      .catch(function (err) {
+        setProgress(0);
+        setStatus("Не удалось обновить " + dev.ip + ": " + (err && err.message ? err.message : err), "err");
+        log("ОШИБКА: " + (err && err.message ? err.message : err));
+        setHint("Если ошибка повторяется, обновите модуль с его собственной страницы " +
+                "(«Настройки» → «Обновление прошивки») — так видно, что именно не принято.");
+      })
+      .then(function () {
+        markBusy(false);
+        render();
+      });
+  }
+
+  var fileBtn = document.getElementById("btnFleetFile");
+  if (fileBtn && fileEl) fileBtn.addEventListener("click", function () { fileEl.click(); });
+
+  if (fileEl) {
+    fileEl.addEventListener("change", function () {
+      var f = fileEl.files && fileEl.files[0];
+      if (f) setHint("Обновление возьмёт файл «" + f.name + "» (" + Math.round(f.size / 1024) + " КБ) вместо скачивания со страницы.");
+    });
+  }
+
+  netEl.value = guessNet() || "192.168.1";
+  scanBtn.addEventListener("click", scan);
+  setHint("Поиск идёт с этого компьютера: модули должны быть в одной с ним сети 2.4 ГГц.");
 })();
 </script>
 

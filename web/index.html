@@ -95,6 +95,11 @@ button:disabled{opacity:.45;cursor:not-allowed}
 }
 .inrow input:focus{border-color:var(--blue)}
 .inrow button{white-space:nowrap;flex:0 0 auto}
+.fleetrow{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px}
+.fleetrow .hint{margin:2px 0 0;font-size:12px;color:var(--muted)}
+.fleetrow b{font-size:14px}
+.fleetrow .pill{margin-left:8px}
 .scanlist{display:none;margin-top:10px;max-height:240px;overflow:auto;border:1px solid var(--line);
   border-radius:10px;background:#0d1728}
 .scanlist.show{display:block}
@@ -299,6 +304,26 @@ button:disabled{opacity:.45;cursor:not-allowed}
       </div>
       <div class="otaprog" id="otaProg"><div class="otabar" id="otaBar"></div></div>
       <p class="hint" id="otaMsg"></p>
+    </div>
+
+    <div class="card" id="fleetCard">
+      <h2>Другие модули в сети</h2>
+      <p class="hint" style="margin-top:0">Поиск автополивов в домашней сети и обновление их прошивки
+        прямо отсюда — к каждому по кабелю ходить не нужно. В списке видны модули с прошивкой
+        <b>1.6.2</b> и новее: более старые не умеют представляться сканеру, их можно обновить только
+        с их собственной страницы. Файл прошивки скачивается из репозитория проекта; если интернета
+        нет, выберите <b>.bin</b> вручную.</p>
+      <div class="grid">
+        <label>Сеть или адрес<input id="fleetNet" maxlength="21" placeholder="192.168.1"></label>
+      </div>
+      <div class="actions" style="padding-top:10px">
+        <button class="blue" id="btnFleetScan">Искать модули</button>
+        <button id="btnFleetFile" type="button" title="Своя копия прошивки — если у модулей нет интернета">Свой .bin</button>
+        <input type="file" id="fleetFile" accept=".bin,application/octet-stream" style="display:none">
+      </div>
+      <div class="otaprog" id="fleetProg"><div class="otabar" id="fleetBar"></div></div>
+      <p class="hint" id="fleetMsg">Поиск ещё не запускали.</p>
+      <div id="fleetList"></div>
     </div>
 
     <div class="card">
@@ -1058,6 +1083,258 @@ async function waitOtaReboot(){
   $('otaMsg').style.color = 'var(--warn)';
 }
 
+/* ---------- другие модули в сети ----------
+   Сканер работает из браузера: он по очереди спрашивает /api/ident у адресов
+   подсети. Отвечают модули с прошивкой 1.6.2+: там появилась эта ручка и
+   заголовки CORS, без которых браузер не отдаёт ответ чужой странице.
+   Обновление — обычная загрузка файла в /api/ota соседнего модуля, тем же
+   способом, что и своя прошивка из карточки выше.                        */
+
+const FW_REPO_BIN  = 'https://raw.githubusercontent.com/max-fat/ESP8266-Autowatering2/main/firmware/autowatering-esp8266.bin';
+const FW_REPO_INFO = 'https://raw.githubusercontent.com/max-fat/ESP8266-Autowatering2/main/firmware/build-info.txt';
+
+let fleetFound = [];     // найденные модули
+let fleetBusy = false;
+let fleetLatest = '';    // версия в репозитории ('' — не знаем, например нет интернета)
+
+function fleetBase(d){
+  return 'http://' + d.host + (d.port && d.port !== 80 ? ':' + d.port : '');
+}
+
+function fleetSetMsg(text, warn){
+  $('fleetMsg').textContent = text;
+  $('fleetMsg').style.color = warn ? 'var(--warn)' : '';
+}
+
+function fleetProgress(p){
+  p = Math.max(0, Math.min(1, p || 0));
+  $('fleetProg').classList.add('show');
+  $('fleetBar').style.width = (p * 100).toFixed(1) + '%';
+}
+
+/* «192.168.1» — вся подсеть, «192.168.1.7» или «192.168.1.7:8080» — один адрес.
+   Порт можно указать и для подсети: «192.168.1:8080». */
+function fleetTargets(spec){
+  const v = String(spec || '').trim();
+  const net = v.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d+))?$/);
+  if(net){
+    const hosts = [];
+    for(let i = 1; i <= 254; i++) hosts.push(net[1] + '.' + i);
+    return {hosts, port: parseInt(net[2] || '80', 10) || 80};
+  }
+  const one = v.match(/^([A-Za-z0-9._-]+)(?::(\d+))?$/);
+  if(one) return {hosts: [one[1]], port: parseInt(one[2] || '80', 10) || 80};
+  return {hosts: [], port: 80};
+}
+
+/* Подсеть по адресу открытой страницы: 192.168.1.42 -> 192.168.1 */
+function fleetGuessNet(){
+  const h = location.hostname || '';
+  const m = h.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/);
+  return m ? m[1] : '192.168.1';
+}
+
+/* Версия в репозитории — необязательное украшение: без интернета запрос
+   висит, поэтому ограничиваем его четырьмя секундами. */
+async function fleetDetectLatest(){
+  const ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const timer = ctl ? setTimeout(()=>ctl.abort(), 4000) : null;
+  try{
+    const r = await fetch(FW_REPO_INFO, {cache:'no-store', signal: ctl ? ctl.signal : undefined});
+    if(!r.ok) return '';
+    const txt = await r.text();
+    const m = txt.match(/version\s*:\s*(\S+)/i);
+    return m ? m[1] : '';
+  }catch(e){ return ''; }
+  finally{ if(timer) clearTimeout(timer); }
+}
+
+function fleetCard(d, idx){
+  const mine = (st && st.wifi && st.wifi.ip && st.wifi.ip === d.ip) || d.host === location.hostname;
+  const name = d.name ? escHtml(d.name) : 'Автополив';
+  let pill = '';
+  if(mine) pill = '<span class="pill running">этот модуль</span>';
+  else if(fleetLatest && d.fw === fleetLatest) pill = '<span class="pill running">актуально</span>';
+  else if(fleetLatest) pill = '<span class="pill wait">есть ' + escHtml(fleetLatest) + '</span>';
+
+  return '<div class="fleetrow">' +
+      '<div><b>' + name + '</b>' + pill +
+        '<div class="hint">' + escHtml(d.ip) + ' · прошивка ' + escHtml(d.fw || '?') + '</div></div>' +
+      (mine ? '' : '<button class="primary small" data-fleet="' + idx + '">Обновить</button>') +
+    '</div>';
+}
+
+function fleetRender(){
+  const box = $('fleetList');
+  box.innerHTML = fleetFound.map(fleetCard).join('');
+  box.querySelectorAll('button[data-fleet]').forEach(b=>{
+    b.addEventListener('click', ()=> fleetUpdate(parseInt(b.dataset.fleet, 10)));
+  });
+  fleetMarkBusy(fleetBusy);
+}
+
+function fleetMarkBusy(on){
+  ['btnFleetScan'].forEach(id => { const b = $(id); if(b) b.disabled = !!on; });
+  document.querySelectorAll('button[data-fleet]').forEach(b=>{ b.disabled = !!on; });
+  const scan = $('btnFleetScan');
+  if(scan) scan.textContent = on ? 'Идёт обновление…' : 'Искать модули';
+}
+
+async function fleetScan(){
+  if(fleetBusy) return;
+  const t = fleetTargets($('fleetNet').value);
+  if(!t.hosts.length){ toast('Укажите сеть вида 192.168.1 или адрес модуля', true); return; }
+
+  fleetBusy = true;
+  fleetMarkBusy(true);
+  fleetFound = [];
+  $('fleetList').innerHTML = '';
+  $('fleetProg').classList.remove('show');
+  $('fleetBar').style.width = '0';
+  fleetSetMsg('Ищу модули… 0 из ' + t.hosts.length);
+
+  const latestTask = fleetDetectLatest();
+  const queue = t.hosts.slice();
+  let done = 0;
+
+  const worker = async ()=>{
+    while(queue.length){
+      const host = queue.shift();
+      const base = 'http://' + host + (t.port !== 80 ? ':' + t.port : '');
+      const ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      const timer = ctl ? setTimeout(()=>ctl.abort(), 1500) : null;
+      try{
+        const r = await fetch(base + '/api/ident', {cache:'no-store', signal: ctl ? ctl.signal : undefined});
+        if(r.ok){
+          const j = await r.json();
+          if(j && j.app === 'autowatering'){
+            fleetFound.push({host, port: t.port, ip: j.ip || host,
+                             name: j.name || '', fw: j.fw || '', ch: j.ch || 0});
+          }
+        }
+      }catch(e){ /* адрес свободен или это не автополив */ }
+      clearTimeout(timer);
+      done++;
+      if(done % 8 === 0 || done === t.hosts.length){
+        fleetSetMsg('Ищу модули… ' + done + ' из ' + t.hosts.length);
+      }
+    }
+  };
+
+  try{
+    await Promise.all(Array.from({length: Math.min(32, t.hosts.length)}, worker));
+    // Список показываем, не дожидаясь репозитория дольше пары секунд.
+    fleetLatest = await Promise.race([latestTask, new Promise(r => setTimeout(()=>r(''), 4500))]);
+  }finally{
+    fleetBusy = false;
+    fleetMarkBusy(false);
+  }
+
+  fleetFound.sort((a, b)=> (a.name || '').localeCompare(b.name || '') || a.host.localeCompare(b.host));
+  fleetRender();
+  if(fleetFound.length){
+    fleetSetMsg('Найдено модулей: ' + fleetFound.length + '.' +
+      (fleetLatest ? ' В репозитории версия ' + fleetLatest + '.' : ' Версию в репозитории узнать не удалось.'));
+  }else{
+    fleetSetMsg('Модулей не найдено. Проверьте, что они в этой же сети (2.4 ГГц) и прошиты 1.6.2+.', true);
+  }
+}
+
+/* Файл прошивки: выбранный вручную или из репозитория проекта. */
+async function fleetFirmware(){
+  const f = $('fleetFile').files && $('fleetFile').files[0];
+  if(f) return f;
+  fleetSetMsg('Скачиваю прошивку из репозитория…');
+  const r = await fetch(FW_REPO_BIN, {cache:'no-store'});
+  if(!r.ok) throw new Error('не удалось скачать прошивку (HTTP ' + r.status + '), выберите файл .bin вручную');
+  const blob = await r.blob();
+  if(blob.size < 32 * 1024) throw new Error('скачался не файл прошивки');
+  return blob;
+}
+
+function fleetUpload(d, blob){
+  return new Promise((resolve, reject)=>{
+    const fd = new FormData();
+    fd.append('firmware', blob, 'autowatering-esp8266.bin');
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', fleetBase(d) + '/api/ota');
+    xhr.upload.onprogress = e => { if(e.lengthComputable) fleetProgress(e.loaded / e.total); };
+    xhr.onload = ()=>{
+      let r = {};
+      try{ r = JSON.parse(xhr.responseText || '{}'); }catch(e){}
+      if(xhr.status === 200 && r.ok) resolve(r);
+      else reject(new Error(r.error || ('HTTP ' + xhr.status)));
+    };
+    xhr.onerror = ()=> reject(new Error('связь оборвалась'));
+    xhr.send(fd);
+  });
+}
+
+/* Модуль перезагружается: ждём, пока он ответит уже с другой версией. */
+async function fleetWait(d, oldFw){
+  const t0 = Date.now();
+  while(Date.now() - t0 < 120000){
+    await new Promise(r => setTimeout(r, 2000));
+    try{
+      const j = await getJson(fleetBase(d) + '/api/ident');
+      if(j && j.app === 'autowatering' && j.fw && j.fw !== oldFw){
+        const item = fleetFound.find(x=>x.host === d.host && x.port === d.port);
+        if(item){ item.fw = j.fw; item.name = j.name || item.name; }
+        return true;
+      }
+    }catch(e){ /* ещё грузится */ }
+  }
+  return false;
+}
+
+async function fleetUpdate(idx){
+  const d = fleetFound[idx];
+  if(!d || fleetBusy) return;
+  if(!confirm('Обновить модуль «' + (d.name || 'Автополив') + '» (' + d.ip + ')?\n\n' +
+              'Полив на нём остановится, модуль перезагрузится. Настройки и задачи сохранятся.')) return;
+
+  fleetBusy = true;
+  fleetMarkBusy(true);
+  fleetProgress(0);
+  try{
+    const blob = await fleetFirmware();
+    fleetSetMsg('Отправляю ' + fmtKb(blob.size) + ' на ' + d.ip + '… не закрывайте страницу');
+    await fleetUpload(d, blob);
+    fleetProgress(1);
+    fleetSetMsg('Прошивка принята модулем ' + d.ip + '. Ждём перезагрузку…');
+    const ok = await fleetWait(d, d.fw);
+    if(ok){
+      fleetSetMsg('Модуль ' + d.ip + ' обновился до ' + d.fw + '.');
+      toast('Модуль ' + d.ip + ' обновлён');
+    }else{
+      fleetSetMsg('Модуль ' + d.ip + ' не ответил за 2 минуты. Проверьте его питание и обновите страницу.', true);
+    }
+  }catch(e){
+    fleetSetMsg('Не удалось обновить ' + d.ip + ': ' + (e && e.message ? e.message : e), true);
+  }finally{
+    fleetBusy = false;
+    fleetMarkBusy(false);
+    fleetRender();
+  }
+}
+
+$('btnFleetScan').addEventListener('click', fleetScan);
+
+$('btnFleetFile').addEventListener('click', ()=> $('fleetFile').click());
+
+$('fleetFile').addEventListener('change', ()=>{
+  const f = $('fleetFile').files && $('fleetFile').files[0];
+  fleetSetMsg(f ? ('Прошивка для обновления: ' + f.name + ' · ' + fmtKb(f.size))
+                : 'Файл не выбран — прошивка будет скачана из репозитория.');
+});
+
+/* Подсеть подставляем по адресу страницы, когда знаем IP модуля. */
+function fleetInitNet(){
+  const ip = (st && st.wifi && st.wifi.ip) ? st.wifi.ip : '';
+  const m = ip.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/);
+  $('fleetNet').value = m ? m[1] : fleetGuessNet();
+}
+
 $('btnImport').addEventListener('click', ()=> $('importFile').click());
 
 $('importFile').addEventListener('change', async (ev)=>{
@@ -1160,6 +1437,7 @@ async function load(){
   if(!cfgLoaded) await loadConfig();
 
   if(!window._otaInfo){ window._otaInfo = true; loadOtaInfo(); }
+  if(!window._fleetNet){ window._fleetNet = true; fleetInitNet(); }
 
   if(!chBuilt && $('t_ch').options.length === 0){
     let opts = '';
