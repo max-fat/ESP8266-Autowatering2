@@ -71,14 +71,17 @@
 | `src/webui.h/.cpp` | HTTP-сервер, REST API, сборка JSON вручную, отдача gzip-страницы |
 | `src/page_html.h` | **Генерируется** из `web/index.html` — не редактировать руками |
 | `web/index.html` | Интерфейс: 3 вкладки (адрес `#tasks/#channels/#settings` открывает нужную), опрос `/api/state` каждые 2 с |
-| `docs/index.html` | Страница проекта для GitHub Pages (`main` + `/docs`): описание, скриншоты, установка, кнопка скачивания. Статический HTML, без JS и внешних CDN. Цифры версии/размера/MD5 подставляет `tools/update_docs.py` — правьте их только через него |
+| `docs/index.html` | Страница проекта для GitHub Pages (`main` + `/docs`): описание, скриншоты, установка, кнопка скачивания и **прошивка по USB из браузера** (раздел `#flash`: Web Serial + `docs/js/flasher.js`). Статический HTML без внешних CDN; единственный скрипт — прошивальщик, он грузится по нажатию кнопки. Цифры версии/размера/MD5 подставляет `tools/update_docs.py` — правьте их только через него |
 | `docs/img/*.png` | Скриншоты интерфейса. **Не рисуйте руками**: снимаются с живого `web/index.html` скриптом `tools/screenshots.js` (Chromium + подмена `fetch`) |
+| `docs/js/flasher.js` | Собранный прошивальщик страницы (esptool-js 0.7.1 + crypto-js в одном IIFE). **Не править руками** — исходник в `tools/flasher/src/flasher.js`, сборка `node tools/build_flasher.js`. Отдаёт `window.EspFlasher`: `isSupported()`, `requestPort()`, `md5()`, `flash({data, port})` |
+| `docs/firmware/autowatering-esp8266.bin` | Копия прошивки для страницы прошивальщика — страница скачивает её с того же домена, без обращений к GitHub. Кладёт `tools/update_docs.py`, MD5 обязан совпадать с `firmware/build-info.txt` |
 | `tools/embed_web.py` | `web/index.html` → `src/page_html.h` (gzip, детерминированный: `mtime=0`) |
 | `tools/build_firmware.sh` | Офлайн-сборка без PlatformIO (ядро 2.4.2 + xtensa gcc 4.8.2) |
 | `tools/elf2bin.py` | Склейка `eboot.elf` + `sketch.elf` в один `.bin` (вендорная копия из core 3.1.2 с патчем) |
 | `tools/pio_embed_web.py` | PlatformIO pre-build hook: пересобирает `page_html.h` |
 | `tools/screenshots.js` | Скриншоты `docs/img/*.png`: настоящий интерфейс с фейковым API (`puppeteer-core` + `@sparticuz/chromium`). Каждый кадр — новая вкладка: `setContent` в одной переиспользует глобальную область и ломается на повторном `let` |
-| `tools/update_docs.py` | Синхронизирует версию/размер/MD5/дату в `docs/index.html` с `firmware/build-info.txt`; `--check` для проверки в CI/перед коммитом |
+| `tools/update_docs.py` | Синхронизирует версию/размер/MD5/дату в `docs/index.html` с `firmware/build-info.txt` и копирует `.bin` в `docs/firmware/`; `--check` для проверки в CI/перед коммитом (сверяет и копию по MD5) |
+| `tools/build_flasher.js` + `tools/flasher/src/flasher.js` | Прошивальщик для страницы: esbuild бандлит `esptool-js` + `crypto-js` в `docs/js/flasher.js`. Порт запрашивается **до** скачивания файла (браузер пускает к USB только сразу после нажатия). Пишет образ с `0x00000`, `dout`/40 МГц/4 МБ, `eraseAll: false`, сверяет MD5, в конце `hard_reset` |
 | `tools/flash.sh` / `tools/flash.bat` | Прошивка через esptool (`COM7`, 921600 по умолчанию) |
 | `platformio.ini` | Сборка/загрузка через PlatformIO (`board = nodemcuv2`) |
 | `tests/host/` | Хост-тесты логики (заглушки Arduino/EEPROM, `make -C tests/host run`) — 68 проверок: storage/CRC, помпы, датчик, планировщик |
@@ -269,6 +272,9 @@ esptool.py --chip esp8266 --port COM7 --baud 921600 write_flash \
    Меняли интерфейс — пересоберите `page_html.h`, переснимите скриншоты
    (`node tools/screenshots.js`) и обновите цифры на странице
    (`python3 tools/update_docs.py`); страница не должна врать про версию.
+   Меняли прошивальщик — `node tools/build_flasher.js` (нужны `esptool-js`,
+   `crypto-js`, `esbuild`) и проверьте `python3 tools/update_docs.py --check`:
+   копия `.bin` в `docs/firmware/` должна совпадать с `firmware/` по MD5.
 4. UI в jsdom с фейковым API: шапка (время/датчик), список задач, каналы,
    заполнение настроек, POST-запросы по кнопкам, отсутствие ошибок JS.
    Для OTA подменяйте `XMLHttpRequest` (fetch не умеет `upload.onprogress`).

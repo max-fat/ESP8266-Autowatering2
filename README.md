@@ -7,7 +7,7 @@
 * Версия прошивки: **1.6.1**
 * Готовый бинарник: [`firmware/autowatering-esp8266.bin`](firmware/autowatering-esp8266.bin)
 * Страница проекта для тех, кто хочет просто скачать: [`docs/index.html`](docs/index.html)
-  (описание, скриншоты, установка — открывается через GitHub Pages)
+  (описание, скриншоты, установка и **прошивка по USB прямо из браузера** — открывается через GitHub Pages)
 * Для других ИИ/разработчиков: [`ReadAI.md`](ReadAI.md)
 
 ---
@@ -365,7 +365,36 @@ flash и запустить». Поэтому обновление не треб
 
 Для тех, кто просто хочет взять прошивку, есть отдельная страница — [`docs/index.html`](docs/index.html):
 описание возможностей, экраны интерфейса, быстрая установка, блок обновления и кнопка скачивания `.bin`.
-Это статический HTML без JavaScript и внешних зависимостей.
+Страница — статический HTML без внешних CDN и сборки; единственный скрипт на ней — прошивальщик
+(см. ниже), он загружается только по нажатию кнопки, поэтому сама страница остаётся лёгкой.
+
+### Прошивка по USB прямо со страницы
+
+В разделе «Прошивка» страница сама пишет `.bin` в плату: Web Serial + [esptool-js](https://github.com/espressif/esptool-js),
+ни esptool, ни Python, ни Arduino IDE на компьютере не нужны.
+
+* Работает в Chrome, Edge и Opera на компьютере (мобильные браузеры Web Serial не поддерживают),
+  страница должна быть открыта по `https://` или на `localhost`.
+* Порт спрашивается первым делом, файл скачивается после — браузер даёт доступ к USB только
+  сразу после нажатия кнопки.
+* Перед записью MD5 скачанного файла сверяется со значением на странице, после записи esptool-js
+  сверяет MD5 с платой; стираются только нужные сектора (`eraseAll: false`), образ пишется
+  с адреса `0x00000` в режиме `dout`/40 МГц под 4 МБ flash. После прошивки — аппаратный сброс
+  и обычная загрузка.
+* Если браузер не умеет Web Serial, кнопка выключается и показывается команда `esptool` из раздела
+  «Установка» — страница деградирует, но не ломается.
+
+Прошивальщик — отдельный бандл:
+
+```bash
+npm i esptool-js crypto-js esbuild      # одноразово, в репозитории зависимостей нет
+node tools/build_flasher.js             # tools/flasher/src/flasher.js -> docs/js/flasher.js
+```
+
+Исходник — [`tools/flasher/src/flasher.js`](tools/flasher/src/flasher.js), собранный файл
+`docs/js/flasher.js` руками не правят. Копию `.bin` для страницы кладёт `tools/update_docs.py`
+(`docs/firmware/autowatering-esp8266.bin`), поэтому на GitHub Pages прошивка доступна с того же
+домена и без внешних ссылок.
 
 Как открыть:
 
@@ -378,7 +407,8 @@ flash и запустить». Поэтому обновление не треб
 | Что | Чем |
 |---|---|
 | Скриншоты (`docs/img/*.png`) | `node tools/screenshots.js` — снимает **настоящий** `web/index.html` с подменённой сетью (Chromium через `puppeteer-core`), кадры: задачи, каналы, настройки, карточка обновления, первый запуск, общий вид |
-| Версия, размер, MD5, дата на странице | `python3 tools/update_docs.py` — берёт цифры из `firmware/build-info.txt`; `--check` только сверяет |
+| Версия, размер, MD5, дата на странице | `python3 tools/update_docs.py` — берёт цифры из `firmware/build-info.txt` и кладёт копию `.bin` в `docs/firmware/`; `--check` только сверяет (в т. ч. что копия совпадает по MD5) |
+| Прошивальщик (`docs/js/flasher.js`) | `node tools/build_flasher.js` — esbuild собирает `tools/flasher/src/flasher.js` вместе с esptool-js; нужны `npm i esptool-js crypto-js esbuild` |
 | Тексты, разделы | руками в `docs/index.html` |
 
 Скриншоты снимаются не «на память», а с живого интерфейса, поэтому после правок в
@@ -412,15 +442,19 @@ src/
   otacheck.*        проверка файла прошивки (.bin, 32 КБ … свободное место)
   page_html.h       сгенерированный (gzip) веб-интерфейс
 web/index.html      исходник интерфейса
-docs/               страница проекта для GitHub Pages (index.html + img/)
+docs/               страница проекта для GitHub Pages (index.html + img/ + js/)
   img/              скриншоты интерфейса (снимаются tools/screenshots.js)
+  js/flasher.js     собранный прошивальщик (Web Serial + esptool-js), не править руками
+  firmware/         копия .bin для прошивки из браузера (кладёт tools/update_docs.py)
 tools/
   embed_web.py      web/index.html -> src/page_html.h
   build_firmware.sh сборка без PlatformIO
   elf2bin.py        eboot + sketch -> единый .bin
   flash.sh          прошивка через esptool
   screenshots.js    скриншоты интерфейса для docs/img (Chromium)
-  update_docs.py    версия/размер/MD5 на странице проекта — из build-info.txt
+  update_docs.py    версия/размер/MD5 на странице + копия .bin в docs/firmware
+  build_flasher.js  tools/flasher/src -> docs/js/flasher.js (esbuild)
+  flasher/src/      исходник прошивальщика для страницы
 firmware/           готовый бинарник и сводка о сборке
 ```
 
